@@ -37,61 +37,92 @@ type record struct {
 	Payload     *string  `json:"payload,omitempty"`
 }
 
-var csvHeader = []string{"au", "dts", "pts", "timescale", "sync", "time", "marker_index", "version", "time_source", "origin_time", "origin_us", "sequence", "stream_id", "payload"}
+const (
+	formatAuto   = "auto"
+	formatAnnexB = "annexb"
+	formatMP4    = "mp4"
+	outJSONL     = "jsonl"
+	outCSV       = "csv"
+)
 
-func runDump(args []string, stdout, stderr io.Writer) int {
+func csvHeader() []string {
+	return []string{
+		"au", "dts", "pts", "timescale", "sync", "time", "marker_index",
+		"version", "time_source", "origin_time", "origin_us", "sequence", "stream_id", "payload",
+	}
+}
+
+// dumpFlags holds runDump's parsed and validated flags.
+type dumpFlags struct {
+	format string
+	out    string
+	all    bool
+	path   string
+}
+
+// parseDumpFlags parses and validates args, writing a usage or validation
+// error to stderr and returning ok=false when args are unusable.
+func parseDumpFlags(args []string, stderr io.Writer) (flags dumpFlags, exitCode int, ok bool) {
 	fs := flag.NewFlagSet("dump", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	format := fs.String("format", "auto", "input format: auto, annexb or mp4")
-	out := fs.String("out", "jsonl", "output format: jsonl or csv")
+	format := fs.String("format", formatAuto, "input format: auto, annexb or mp4")
+	out := fs.String("out", outJSONL, "output format: jsonl or csv")
 	all := fs.Bool("all", false, "also print access units without a marker")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return dumpFlags{}, 2, false
 	}
 	if fs.NArg() != 1 {
-		_, _ = fmt.Fprintln(stderr, "seimark dump: exactly one FILE is required")
-		return 2
+		fmt.Fprintln(stderr, "seimark dump: exactly one FILE is required")
+		return dumpFlags{}, 2, false
 	}
-	if *out != "jsonl" && *out != "csv" {
-		_, _ = fmt.Fprintf(stderr, "seimark dump: -out must be jsonl or csv, got %q\n", *out)
-		return 2
+	if *out != outJSONL && *out != outCSV {
+		fmt.Fprintf(stderr, "seimark dump: -out must be jsonl or csv, got %q\n", *out)
+		return dumpFlags{}, 2, false
 	}
-	if *format != "auto" && *format != "annexb" && *format != "mp4" {
-		_, _ = fmt.Fprintf(stderr, "seimark dump: -format must be auto, annexb or mp4, got %q\n", *format)
-		return 2
+	if *format != formatAuto && *format != formatAnnexB && *format != formatMP4 {
+		fmt.Fprintf(stderr, "seimark dump: -format must be auto, annexb or mp4, got %q\n", *format)
+		return dumpFlags{}, 2, false
 	}
-	path := fs.Arg(0)
-	f, err := os.Open(path)
+	return dumpFlags{format: *format, out: *out, all: *all, path: fs.Arg(0)}, 0, true
+}
+
+func runDump(args []string, stdout, stderr io.Writer) int {
+	flags, exitCode, ok := parseDumpFlags(args, stderr)
+	if !ok {
+		return exitCode
+	}
+	f, err := os.Open(flags.path)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "seimark dump: %v\n", err)
+		fmt.Fprintf(stderr, "seimark dump: %v\n", err)
 		return 1
 	}
 	defer func() { _ = f.Close() }()
 
-	if *format == "auto" {
-		*format, err = sniff(f)
+	format := flags.format
+	if format == formatAuto {
+		format, err = sniff(f)
 		if err != nil {
-			_, _ = fmt.Fprintf(stderr, "seimark dump: %v; pass -format\n", err)
+			fmt.Fprintf(stderr, "seimark dump: %v; pass -format\n", err)
 			return 2
 		}
 	}
-	w := newRecordWriter(*out, stdout)
+	w := newRecordWriter(flags.out, stdout)
 	warn := func(au int, err error) {
-		_, _ = fmt.Fprintf(stderr, "seimark dump: access unit %d: %v\n", au, err)
+		fmt.Fprintf(stderr, "seimark dump: access unit %d: %v\n", au, err)
 	}
 	var walkErr error
-	switch *format {
-	case "annexb":
-		walkErr = dumpAnnexB(f, w, *all, warn)
-	case "mp4":
-		walkErr = dumpMP4(f, w, *all, warn)
+	switch format {
+	case formatAnnexB:
+		walkErr = dumpAnnexB(f, w, flags.all, warn)
+	case formatMP4:
+		walkErr = dumpMP4(f, w, flags.all, warn)
 	}
 	if err := w.flush(); err != nil {
-		_, _ = fmt.Fprintf(stderr, "seimark dump: write: %v\n", err)
+		fmt.Fprintf(stderr, "seimark dump: write: %v\n", err)
 		return 1
 	}
 	if walkErr != nil {
-		_, _ = fmt.Fprintf(stderr, "seimark dump: %v\n", walkErr)
+		fmt.Fprintf(stderr, "seimark dump: %v\n", walkErr)
 		return 1
 	}
 	return 0
@@ -102,16 +133,16 @@ func sniff(f io.ReadSeeker) (string, error) {
 	var head [12]byte
 	n, _ := io.ReadFull(f, head[:])
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return "", err
+		return "", fmt.Errorf("seimark: rewind input: %w", err)
 	}
 	if n >= 8 {
 		switch string(head[4:8]) {
 		case "ftyp", "moov", "moof", "styp":
-			return "mp4", nil
+			return formatMP4, nil
 		}
 	}
 	if h264.DetectFormat(head[:n]) == h264.FormatAnnexB {
-		return "annexb", nil
+		return formatAnnexB, nil
 	}
 	return "", errors.New("cannot tell the input format from its first bytes")
 }
@@ -122,7 +153,7 @@ func dumpAnnexB(r io.Reader, w *recordWriter, all bool, warn func(int, error)) e
 		if err != nil {
 			return err
 		}
-		emit(w, record{AU: index}, au, h264.FormatAnnexB, all, warn)
+		emit(w, &record{AU: index}, au, h264.FormatAnnexB, all, warn)
 		index++
 	}
 	return nil
@@ -136,14 +167,14 @@ func dumpMP4(r io.ReadSeeker, w *recordWriter, all bool, warn func(int, error)) 
 		dts, pts, ts, sync := s.DTS, s.PTS, s.Timescale, s.Sync
 		t := float64(pts) / float64(ts)
 		base := record{AU: s.Index, DTS: &dts, PTS: &pts, Timescale: &ts, Sync: &sync, Time: &t}
-		emit(w, base, s.Data, h264.FormatLengthPrefixed, all, warn)
+		emit(w, &base, s.Data, h264.FormatLengthPrefixed, all, warn)
 	}
 	return nil
 }
 
 // emit writes one record per marker in the access unit, or the bare record when
 // all is set and no marker was found.
-func emit(w *recordWriter, base record, au []byte, f h264.Format, all bool, warn func(int, error)) {
+func emit(w *recordWriter, base *record, au []byte, f h264.Format, all bool, warn func(int, error)) {
 	markers, err := h264.Markers(au, f)
 	if err != nil {
 		warn(base.AU, err)
@@ -155,8 +186,7 @@ func emit(w *recordWriter, base record, au []byte, f h264.Format, all bool, warn
 		return
 	}
 	for i, m := range markers {
-		rec := base
-		i := i
+		rec := *base
 		v := marker.Version
 		us := m.OriginTime.UnixMicro()
 		seq := m.Sequence
@@ -171,7 +201,7 @@ func emit(w *recordWriter, base record, au []byte, f h264.Format, all bool, warn
 			p := base64.StdEncoding.EncodeToString(m.Payload)
 			rec.Payload = &p
 		}
-		w.write(rec)
+		w.write(&rec)
 	}
 }
 
@@ -182,15 +212,15 @@ type recordWriter struct {
 }
 
 func newRecordWriter(format string, out io.Writer) *recordWriter {
-	if format == "csv" {
+	if format == outCSV {
 		w := csv.NewWriter(out)
-		_ = w.Write(csvHeader)
+		_ = w.Write(csvHeader())
 		return &recordWriter{csv: w}
 	}
 	return &recordWriter{jsonl: bufio.NewWriter(out)}
 }
 
-func (w *recordWriter) write(r record) {
+func (w *recordWriter) write(r *record) {
 	if w.err != nil {
 		return
 	}
@@ -213,49 +243,71 @@ func (w *recordWriter) flush() error {
 	}
 	if w.csv != nil {
 		w.csv.Flush()
-		return w.csv.Error()
+		if err := w.csv.Error(); err != nil {
+			return fmt.Errorf("seimark: write csv: %w", err)
+		}
+		return nil
 	}
-	return w.jsonl.Flush()
+	if err := w.jsonl.Flush(); err != nil {
+		return fmt.Errorf("seimark: write jsonl: %w", err)
+	}
+	return nil
 }
 
-func csvRow(r record) []string {
-	str := func(v any) string {
-		switch x := v.(type) {
-		case *uint64:
-			if x != nil {
-				return strconv.FormatUint(*x, 10)
-			}
-		case *int64:
-			if x != nil {
-				return strconv.FormatInt(*x, 10)
-			}
-		case *uint32:
-			if x != nil {
-				return strconv.FormatUint(uint64(*x), 10)
-			}
-		case *int:
-			if x != nil {
-				return strconv.Itoa(*x)
-			}
-		case *bool:
-			if x != nil {
-				return strconv.FormatBool(*x)
-			}
-		case *float64:
-			if x != nil {
-				return strconv.FormatFloat(*x, 'f', -1, 64)
-			}
-		case *string:
-			if x != nil {
-				return *x
-			}
-		case string:
-			return x
-		}
+// csvField renders one optional record field for a CSV row: "" when the
+// pointer is nil, its formatted value otherwise.
+func csvField(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	if csvFieldIsNil(v) {
 		return ""
 	}
+	switch x := v.(type) {
+	case *uint64:
+		return strconv.FormatUint(*x, 10)
+	case *int64:
+		return strconv.FormatInt(*x, 10)
+	case *uint32:
+		return strconv.FormatUint(uint64(*x), 10)
+	case *int:
+		return strconv.Itoa(*x)
+	case *bool:
+		return strconv.FormatBool(*x)
+	case *float64:
+		return strconv.FormatFloat(*x, 'f', -1, 64)
+	case *string:
+		return *x
+	}
+	return ""
+}
+
+// csvFieldIsNil reports whether v holds a nil pointer of one of the optional
+// record field types.
+func csvFieldIsNil(v any) bool {
+	switch x := v.(type) {
+	case *uint64:
+		return x == nil
+	case *int64:
+		return x == nil
+	case *uint32:
+		return x == nil
+	case *int:
+		return x == nil
+	case *bool:
+		return x == nil
+	case *float64:
+		return x == nil
+	case *string:
+		return x == nil
+	}
+	return false
+}
+
+func csvRow(r *record) []string {
 	return []string{
-		strconv.Itoa(r.AU), str(r.DTS), str(r.PTS), str(r.Timescale), str(r.Sync), str(r.Time),
-		str(r.MarkerIndex), str(r.Version), r.TimeSource, r.OriginTime, str(r.OriginUS), str(r.Sequence), r.StreamID, str(r.Payload),
+		strconv.Itoa(r.AU), csvField(r.DTS), csvField(r.PTS), csvField(r.Timescale), csvField(r.Sync), csvField(r.Time),
+		csvField(r.MarkerIndex), csvField(r.Version), r.TimeSource, r.OriginTime, csvField(r.OriginUS), csvField(r.Sequence),
+		r.StreamID, csvField(r.Payload),
 	}
 }

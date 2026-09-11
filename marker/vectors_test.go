@@ -1,6 +1,7 @@
 package marker
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -34,6 +35,7 @@ func errorCode(err error) string {
 }
 
 func TestVectors(t *testing.T) {
+	t.Parallel()
 	bins, err := filepath.Glob(filepath.Join("..", "vectors", "markers", "*.bin"))
 	if err != nil || len(bins) == 0 {
 		t.Fatalf("no vectors found: %v", err)
@@ -41,6 +43,7 @@ func TestVectors(t *testing.T) {
 	for _, bin := range bins {
 		name := strings.TrimSuffix(filepath.Base(bin), ".bin")
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			body, err := os.ReadFile(bin)
 			if err != nil {
 				t.Fatal(err)
@@ -93,7 +96,7 @@ func TestVectors(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Encode: %v", err)
 			}
-			if string(enc) != string(body[:len(enc)]) {
+			if !bytes.Equal(enc, body[:len(enc)]) {
 				t.Errorf("re-encoded body differs:\n got %x\nwant %x", enc, body)
 			}
 		})

@@ -24,6 +24,8 @@ func (f Format) String() string {
 		return "annexb"
 	case FormatLengthPrefixed:
 		return "length-prefixed"
+	case FormatUnknown:
+		return "unknown"
 	}
 	return "unknown"
 }
@@ -62,6 +64,8 @@ func NALUnits(au []byte, f Format) ([][]byte, error) {
 			return nil, fmt.Errorf("seimark: length-prefixed access unit: %w", err)
 		}
 		return nalus, nil
+	case FormatUnknown:
+		return nil, ErrUnknownFormat
 	}
 	return nil, ErrUnknownFormat
 }

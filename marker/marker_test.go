@@ -31,6 +31,7 @@ func exampleMarker() Marker {
 }
 
 func TestDecodeExample(t *testing.T) {
+	t.Parallel()
 	got, err := Decode(unhex(t, exampleBodyHex))
 	if err != nil {
 		t.Fatalf("Decode: %v", err)
@@ -46,6 +47,7 @@ func TestDecodeExample(t *testing.T) {
 }
 
 func TestDecodeCaptureWithPayload(t *testing.T) {
+	t.Parallel()
 	body := unhex(t, "01 03 00 06 5b 3b 5e 16 94 00 00 00 00 07 9f 3c 1a 77 e2 b0 4d 51 00 05 68 65 6c 6c 6f")
 	got, err := Decode(body)
 	if err != nil {
@@ -67,6 +69,7 @@ func TestDecodeCaptureWithPayload(t *testing.T) {
 }
 
 func TestDecodeEmptyPayloadIsPresent(t *testing.T) {
+	t.Parallel()
 	got, err := Decode(unhex(t, "01 02 00 06 5b 3b 5e 16 94 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51 00 00"))
 	if err != nil {
 		t.Fatalf("Decode: %v", err)
@@ -77,6 +80,7 @@ func TestDecodeEmptyPayloadIsPresent(t *testing.T) {
 }
 
 func TestDecodeIgnoresReservedBitsAndTrailingBytes(t *testing.T) {
+	t.Parallel()
 	body := append(unhex(t, exampleBodyHex), 0xde, 0xad)
 	body[1] = 0xfc // reserved bits set, time and payload flags clear
 	got, err := Decode(body)
@@ -89,6 +93,7 @@ func TestDecodeIgnoresReservedBitsAndTrailingBytes(t *testing.T) {
 }
 
 func TestDecodeErrors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		body string
@@ -102,6 +107,7 @@ func TestDecodeErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := Decode(unhex(t, tt.body))
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("err = %v, want %v", err, tt.want)
@@ -111,13 +117,15 @@ func TestDecodeErrors(t *testing.T) {
 }
 
 func TestIsFormatUUID(t *testing.T) {
-	if !IsFormatUUID(FormatUUID[:]) {
+	t.Parallel()
+	uuid := FormatUUID()
+	if !IsFormatUUID(uuid[:]) {
 		t.Error("FormatUUID not recognised")
 	}
-	if IsFormatUUID(FormatUUID[:15]) {
+	if IsFormatUUID(uuid[:15]) {
 		t.Error("short slice recognised")
 	}
-	other := FormatUUID
+	other := FormatUUID()
 	other[0]++
 	if IsFormatUUID(other[:]) {
 		t.Error("different UUID recognised")
@@ -125,12 +133,14 @@ func TestIsFormatUUID(t *testing.T) {
 }
 
 func TestTimeSourceString(t *testing.T) {
+	t.Parallel()
 	if TimeSend.String() != "send" || TimeCapture.String() != "capture" {
 		t.Fatalf("String() = %q, %q", TimeSend, TimeCapture)
 	}
 }
 
 func TestEncodeExample(t *testing.T) {
+	t.Parallel()
 	got, err := exampleMarker().Encode()
 	if err != nil {
 		t.Fatalf("Encode: %v", err)
@@ -141,6 +151,7 @@ func TestEncodeExample(t *testing.T) {
 }
 
 func TestEncodeCaptureWithPayload(t *testing.T) {
+	t.Parallel()
 	m := exampleMarker()
 	m.TimeSource = TimeCapture
 	m.Sequence = 7
@@ -156,6 +167,7 @@ func TestEncodeCaptureWithPayload(t *testing.T) {
 }
 
 func TestEncodeEmptyPayloadSetsFlag(t *testing.T) {
+	t.Parallel()
 	m := exampleMarker()
 	m.Payload = []byte{}
 	got, err := m.Encode()
@@ -168,6 +180,7 @@ func TestEncodeEmptyPayloadSetsFlag(t *testing.T) {
 }
 
 func TestEncodePayloadTooLarge(t *testing.T) {
+	t.Parallel()
 	m := exampleMarker()
 	m.Payload = make([]byte, PayloadHardLimit+1)
 	if _, err := m.Encode(); !errors.Is(err, ErrPayloadTooLarge) {
@@ -180,6 +193,7 @@ func TestEncodePayloadTooLarge(t *testing.T) {
 }
 
 func TestRoundTripRoundsToMicroseconds(t *testing.T) {
+	t.Parallel()
 	m := exampleMarker()
 	m.OriginTime = m.OriginTime.Add(1500 * time.Nanosecond)
 	body, err := m.Encode()

@@ -67,14 +67,17 @@ func checkFixture(t *testing.T, samples []Sample) {
 }
 
 func TestVideoSamplesProgressive(t *testing.T) {
+	t.Parallel()
 	checkFixture(t, collect(t, "testsrc-marked.mp4"))
 }
 
 func TestVideoSamplesFragmented(t *testing.T) {
+	t.Parallel()
 	checkFixture(t, collect(t, "testsrc-marked-frag.mp4"))
 }
 
 func TestVideoSamplesNoVideoTrack(t *testing.T) {
+	t.Parallel()
 	// An MP4 with only an ftyp box: no moov, no video.
 	ftyp := []byte{0, 0, 0, 0x14, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm', 0, 0, 0, 0, 'i', 's', 'o', 'm'}
 	var sawErr error
@@ -87,6 +90,7 @@ func TestVideoSamplesNoVideoTrack(t *testing.T) {
 }
 
 func TestVideoSamplesGarbage(t *testing.T) {
+	t.Parallel()
 	var sawErr error
 	for _, err := range VideoSamples(bytes.NewReader([]byte("not an mp4 file at all"))) {
 		sawErr = err

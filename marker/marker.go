@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -16,7 +17,9 @@ const (
 )
 
 // FormatUUID identifies a seimark marker inside a user_data_unregistered SEI message.
-var FormatUUID = [16]byte{0x44, 0xa7, 0x3c, 0xb9, 0xb3, 0x6c, 0x45, 0x9a, 0x8f, 0x1a, 0xa3, 0xaa, 0x43, 0x1f, 0x62, 0x4a}
+func FormatUUID() [16]byte {
+	return [16]byte{0x44, 0xa7, 0x3c, 0xb9, 0xb3, 0x6c, 0x45, 0x9a, 0x8f, 0x1a, 0xa3, 0xaa, 0x43, 0x1f, 0x62, 0x4a}
+}
 
 type TimeSource uint8
 
@@ -65,8 +68,12 @@ func Decode(body []byte) (Marker, error) {
 		return Marker{}, fmt.Errorf("%w: %d", ErrUnsupportedVersion, body[0])
 	}
 	flags := body[1]
+	originUS := binary.BigEndian.Uint64(body[2:10])
+	if originUS > math.MaxInt64 {
+		return Marker{}, fmt.Errorf("seimark: origin time %d overflows int64 microseconds", originUS)
+	}
 	m := Marker{
-		OriginTime: time.UnixMicro(int64(binary.BigEndian.Uint64(body[2:10]))).UTC(),
+		OriginTime: time.UnixMicro(int64(originUS)).UTC(),
 		Sequence:   binary.BigEndian.Uint32(body[10:14]),
 	}
 	if flags&flagTimeCapture != 0 {
@@ -88,7 +95,7 @@ func Decode(body []byte) (Marker, error) {
 
 // IsFormatUUID reports whether uuid is the seimark format UUID.
 func IsFormatUUID(uuid []byte) bool {
-	return len(uuid) == 16 && [16]byte(uuid) == FormatUUID
+	return len(uuid) == 16 && [16]byte(uuid) == FormatUUID()
 }
 
 // Encode returns the marker body. The payload flag is set when Payload is non-nil.
@@ -106,8 +113,12 @@ func (m Marker) Encode() ([]byte, error) {
 	binary.BigEndian.PutUint32(out[10:14], m.Sequence)
 	copy(out[14:22], m.StreamID[:])
 	if m.Payload != nil {
+		n := len(m.Payload)
+		if n > PayloadHardLimit {
+			return nil, fmt.Errorf("%w: %d", ErrPayloadTooLarge, n)
+		}
 		out[1] |= flagPayload
-		out = binary.BigEndian.AppendUint16(out, uint16(len(m.Payload)))
+		out = binary.BigEndian.AppendUint16(out, uint16(n))
 		out = append(out, m.Payload...)
 	}
 	return out, nil

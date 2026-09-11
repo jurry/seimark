@@ -9,6 +9,7 @@ import (
 )
 
 func TestNALVectors(t *testing.T) {
+	t.Parallel()
 	bins, err := filepath.Glob(filepath.Join("..", "vectors", "nal", "*.bin"))
 	if err != nil || len(bins) == 0 {
 		t.Fatalf("no vectors found: %v", err)
@@ -16,6 +17,7 @@ func TestNALVectors(t *testing.T) {
 	for _, bin := range bins {
 		name := strings.TrimSuffix(filepath.Base(bin), ".bin")
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			nal, err := os.ReadFile(bin)
 			if err != nil {
 				t.Fatal(err)

@@ -13,7 +13,9 @@ import (
 // approaches it at the resolutions seimark is used with.
 const maxNALUnitSize = 16 << 20
 
-var startCode = []byte{0, 0, 1}
+func startCode() []byte {
+	return []byte{0, 0, 1}
+}
 
 // AccessUnits splits an Annex B byte stream into access units. Each yielded
 // unit uses four-byte start codes. A new unit begins, once the current one holds
@@ -63,6 +65,8 @@ func startsAccessUnit(nal []byte, t avc.NaluType) bool {
 		// first_mb_in_slice is the first ue(v) after the header; it is zero
 		// exactly when the first bit is 1.
 		return len(nal) > 1 && nal[1]&0x80 != 0
+	case avc.NALU_EO_SEQ, avc.NALU_EO_STREAM, avc.NALU_FILL:
+		return false
 	}
 	return false
 }
@@ -70,16 +74,17 @@ func startsAccessUnit(nal []byte, t avc.NaluType) bool {
 // splitNALUnits is a bufio.SplitFunc yielding NAL units without start codes.
 // Trailing zero bytes belong to the next start code or are trailing_zero_8bits,
 // so they are trimmed.
-func splitNALUnits(data []byte, atEOF bool) (int, []byte, error) {
-	begin := bytes.Index(data, startCode)
+func splitNALUnits(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	sc := startCode()
+	begin := bytes.Index(data, sc)
 	if begin < 0 {
 		if atEOF {
 			return len(data), nil, nil
 		}
 		return 0, nil, nil
 	}
-	begin += len(startCode)
-	next := bytes.Index(data[begin:], startCode)
+	begin += len(sc)
+	next := bytes.Index(data[begin:], sc)
 	if next < 0 {
 		if !atEOF {
 			return 0, nil, nil

@@ -4,9 +4,12 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Eyevinn/mp4ff/avc"
@@ -27,14 +30,16 @@ func main() {
 }
 
 func run(inPath, outPath string) error {
+	inPath = filepath.Clean(inPath)
+	outPath = filepath.Clean(outPath)
 	in, err := os.Open(inPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("seimark: open %s: %w", inPath, err)
 	}
 	defer func() { _ = in.Close() }()
 	out, err := os.Create(outPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("seimark: create %s: %w", outPath, err)
 	}
 	defer func() { _ = out.Close() }()
 
@@ -43,11 +48,15 @@ func run(inPath, outPath string) error {
 	index := 0
 	for au, err := range h264.AccessUnits(in) {
 		if err != nil {
-			return err
+			return fmt.Errorf("seimark: read access unit %d: %w", index, err)
 		}
+		if index < 0 || index > math.MaxUint32 {
+			return fmt.Errorf("seimark: sequence %d overflows uint32", index)
+		}
+		sequence := uint32(index)
 		m := marker.Marker{
 			OriginTime: base.Add(time.Duration(index) * 100 * time.Millisecond),
-			Sequence:   uint32(index),
+			Sequence:   sequence,
 			StreamID:   streamID,
 		}
 		if index == 0 {
@@ -55,11 +64,11 @@ func run(inPath, outPath string) error {
 		}
 		body, err := m.Encode()
 		if err != nil {
-			return err
+			return fmt.Errorf("seimark: encode marker %d: %w", index, err)
 		}
-		nal, err := h264.UserDataSEINAL(marker.FormatUUID, body)
+		nal, err := h264.UserDataSEINAL(marker.FormatUUID(), body)
 		if err != nil {
-			return err
+			return fmt.Errorf("seimark: build SEI NAL %d: %w", index, err)
 		}
 		if err := writeMarked(out, au, nal); err != nil {
 			return err
@@ -76,7 +85,7 @@ func run(inPath, outPath string) error {
 func writeMarked(w io.Writer, au, markerNAL []byte) error {
 	nalus, err := h264.NALUnits(au, h264.FormatAnnexB)
 	if err != nil {
-		return err
+		return fmt.Errorf("seimark: split access unit: %w", err)
 	}
 	inserted := false
 	for _, nal := range nalus {
@@ -91,15 +100,17 @@ func writeMarked(w io.Writer, au, markerNAL []byte) error {
 		}
 	}
 	if !inserted {
-		return fmt.Errorf("access unit without a VCL NAL unit")
+		return errors.New("access unit without a VCL NAL unit")
 	}
 	return nil
 }
 
 func writeNAL(w io.Writer, nal []byte) error {
 	if _, err := w.Write([]byte{0, 0, 0, 1}); err != nil {
-		return err
+		return fmt.Errorf("seimark: write start code: %w", err)
 	}
-	_, err := w.Write(nal)
-	return err
+	if _, err := w.Write(nal); err != nil {
+		return fmt.Errorf("seimark: write NAL unit: %w", err)
+	}
+	return nil
 }

@@ -27,7 +27,8 @@ func unhex(t *testing.T, s string) []byte {
 }
 
 func TestUserDataSEINALMatchesSpecExample(t *testing.T) {
-	got, err := UserDataSEINAL(marker.FormatUUID, unhex(t, exampleBodyHex))
+	t.Parallel()
+	got, err := UserDataSEINAL(marker.FormatUUID(), unhex(t, exampleBodyHex))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,8 +38,9 @@ func TestUserDataSEINALMatchesSpecExample(t *testing.T) {
 }
 
 func TestUserDataSEINALLargeBodyUsesMultiBytePayloadSize(t *testing.T) {
+	t.Parallel()
 	body := bytes.Repeat([]byte{0x11}, 300) // payloadSize 316 = 0xff + 0x3d
-	got, err := UserDataSEINAL(marker.FormatUUID, body)
+	got, err := UserDataSEINAL(marker.FormatUUID(), body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +94,7 @@ func foreignSEINAL(t *testing.T) []byte {
 }
 
 func TestMarkersFindsOneBeforeVCL(t *testing.T) {
+	t.Parallel()
 	au := annexB(sps, pps, exampleMarkerNAL(t), idr)
 	got, err := Markers(au, FormatAnnexB)
 	if err != nil {
@@ -103,6 +106,7 @@ func TestMarkersFindsOneBeforeVCL(t *testing.T) {
 }
 
 func TestMarkersLengthPrefixedAndAppended(t *testing.T) {
+	t.Parallel()
 	au := lengthPrefixed(nonIDR, exampleMarkerNAL(t))
 	got, err := Markers(au, FormatLengthPrefixed)
 	if err != nil {
@@ -114,6 +118,7 @@ func TestMarkersLengthPrefixedAndAppended(t *testing.T) {
 }
 
 func TestMarkersSkipsForeignSEI(t *testing.T) {
+	t.Parallel()
 	au := annexB(foreignSEINAL(t), exampleMarkerNAL(t), idr)
 	got, err := Markers(au, FormatAnnexB)
 	if err != nil {
@@ -125,12 +130,13 @@ func TestMarkersSkipsForeignSEI(t *testing.T) {
 }
 
 func TestMarkersTwoInOneAccessUnitKeepOrder(t *testing.T) {
+	t.Parallel()
 	second := marker.Marker{OriginTime: time.Unix(1789160400, 0), Sequence: 9, StreamID: [8]byte{1, 2, 3, 4, 5, 6, 7, 8}}
 	body, err := second.Encode()
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondNAL, err := UserDataSEINAL(marker.FormatUUID, body)
+	secondNAL, err := UserDataSEINAL(marker.FormatUUID(), body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,6 +151,7 @@ func TestMarkersTwoInOneAccessUnitKeepOrder(t *testing.T) {
 }
 
 func TestMarkersNoSEI(t *testing.T) {
+	t.Parallel()
 	got, err := Markers(annexB(sps, pps, idr), FormatAnnexB)
 	if err != nil || len(got) != 0 {
 		t.Fatalf("got %v, %v; want none", got, err)
@@ -152,7 +159,8 @@ func TestMarkersNoSEI(t *testing.T) {
 }
 
 func TestMarkersMalformedMarkerIsAnError(t *testing.T) {
-	bad, err := UserDataSEINAL(marker.FormatUUID, []byte{0x02, 0x00, 0x00}) // version 2, truncated
+	t.Parallel()
+	bad, err := UserDataSEINAL(marker.FormatUUID(), []byte{0x02, 0x00, 0x00}) // version 2, truncated
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,6 +175,7 @@ func TestMarkersMalformedMarkerIsAnError(t *testing.T) {
 }
 
 func TestMarkersUnparsableSEIIsSkipped(t *testing.T) {
+	t.Parallel()
 	garbage := []byte{0x06, 0xff, 0xff, 0xff} // SEI header, then a payload type that never ends
 	got, err := Markers(annexB(garbage, exampleMarkerNAL(t), idr), FormatAnnexB)
 	if err != nil {

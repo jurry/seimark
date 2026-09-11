@@ -1,15 +1,90 @@
 version: "2"
+
+# Strict by default: every linter golangci-lint ships is on, and each one that
+# is off says why. A new linter in a new golangci-lint version is therefore on
+# until someone argues it off here.
 linters:
-  default: standard
-  enable:
-    - errorlint
-    - gocritic
-    - misspell
-    - nolintlint
-    - prealloc
-    - unconvert
-    - unparam
+  default: all
+  disable:
+    - depguard        # no import policy yet; enable when one exists
+    - err113          # sentinel errors are wrapped with %w; dynamic errors carry context and are fine
+    - exhaustruct     # option structs and mp4ff structs are meant to be partially filled
+    - forbidigo       # nothing to forbid yet
+    - funcorder       # declaration order is a matter of reading flow, not a rule
+    - godox           # TODO markers are allowed while a phase is in flight
+    - goheader        # no licence header policy
+    - gomodguard      # no module policy beyond the single dependency
+    - ireturn         # iter.Seq2 is an interface-shaped return by design
+    - mnd             # bitstream code is made of specified numbers; named constants for each would hide the spec
+    - nlreturn        # whitespace before return is style, not correctness
+    - noinlineerr     # inline error handling is idiomatic Go
+    - nonamedreturns  # named returns are fine when they document meaning
+    - testpackage     # white-box tests are wanted for a codec
+    - varnamelen      # short names in short scopes are idiomatic
+    - wsl             # whitespace rules beyond gofumpt add churn without clarity (deprecated alias, still enabled by default: all)
+    - wsl_v5          # whitespace rules beyond gofumpt add churn without clarity
+  settings:
+    cyclop:
+      max-complexity: 15
+    errcheck:
+      check-type-assertions: true
+    exhaustive:
+      default-signifies-exhaustive: true
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+    gocognit:
+      min-complexity: 20
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+    lll:
+      line-length: 140
+    nakedret:
+      max-func-lines: 1
+    revive:
+      rules:
+        - name: exported
+          arguments: [checkPrivateReceivers, disableStutteringCheck]
+    tagliatelle:
+      case:
+        rules:
+          json: snake
+    unparam:
+      check-exported: false
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - dupl
+          - errcheck
+          - funlen
+          - gocognit
+          - gocyclo
+          - cyclop
+          - gosec
+          - lll
+          - maintidx
+          - gochecknoglobals
+
 formatters:
   enable:
+    - gci
     - gofmt
+    - gofumpt
     - goimports
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - localmodule

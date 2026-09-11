@@ -22,16 +22,16 @@ func main() {
 // can drive the command without a process.
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, usage)
+		fmt.Fprintln(stderr, usage)
 		return 2
 	}
 	switch args[0] {
 	case "dump":
 		return runDump(args[1:], stdout, stderr)
 	case "-h", "--help", "help":
-		_, _ = fmt.Fprintln(stdout, usage)
+		fmt.Fprintln(stdout, usage)
 		return 0
 	}
-	_, _ = fmt.Fprintf(stderr, "seimark: unknown command %q\n%s\n", args[0], usage)
+	fmt.Fprintf(stderr, "seimark: unknown command %q\n%s\n", args[0], usage)
 	return 2
 }

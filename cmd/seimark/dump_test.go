@@ -8,8 +8,10 @@ import (
 )
 
 func TestDumpGolden(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"testsrc-marked.h264", "testsrc-marked.mp4", "testsrc-marked-frag.mp4"} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			path := filepath.Join("..", "..", "vectors", "streams", name)
 			want, err := os.ReadFile(path + ".jsonl")
 			if err != nil {
@@ -28,6 +30,7 @@ func TestDumpGolden(t *testing.T) {
 }
 
 func TestDumpCSVHeaderAndCount(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join("..", "..", "vectors", "streams", "testsrc-marked.mp4")
 	var out, errOut bytes.Buffer
 	if code := run([]string{"dump", "-out", "csv", path}, &out, &errOut); code != 0 {
@@ -43,6 +46,7 @@ func TestDumpCSVHeaderAndCount(t *testing.T) {
 }
 
 func TestDumpAllIncludesUnmarked(t *testing.T) {
+	t.Parallel()
 	// The h264 fixture has a marker in every access unit, so -all changes nothing there;
 	// build a two-unit stream with one unmarked unit instead.
 	dir := t.TempDir()
@@ -76,6 +80,7 @@ func TestDumpAllIncludesUnmarked(t *testing.T) {
 }
 
 func TestDumpUsageErrors(t *testing.T) {
+	t.Parallel()
 	var out, errOut bytes.Buffer
 	if code := run([]string{"dump"}, &out, &errOut); code != 2 {
 		t.Fatalf("no file: exit %d, want 2", code)

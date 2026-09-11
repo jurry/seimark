@@ -25,6 +25,7 @@ func collect(t *testing.T, stream []byte) [][]byte {
 }
 
 func TestAccessUnitsSplitsOnNewPicture(t *testing.T) {
+	t.Parallel()
 	stream := annexB(sps, pps, idr, nonIDR, nonIDRMore)
 	aus := collect(t, stream)
 	if len(aus) != 3 {
@@ -37,6 +38,7 @@ func TestAccessUnitsSplitsOnNewPicture(t *testing.T) {
 }
 
 func TestAccessUnitsKeepsSecondSliceOfSamePicture(t *testing.T) {
+	t.Parallel()
 	aus := collect(t, annexB(idr, sliceCont, nonIDR))
 	if len(aus) != 2 {
 		t.Fatalf("got %d access units, want 2", len(aus))
@@ -48,6 +50,7 @@ func TestAccessUnitsKeepsSecondSliceOfSamePicture(t *testing.T) {
 }
 
 func TestAccessUnitsSplitsOnDelimiterAndParameterSets(t *testing.T) {
+	t.Parallel()
 	aus := collect(t, annexB(aud, sps, pps, idr, aud, nonIDR, sps, pps, idr))
 	if len(aus) != 3 {
 		t.Fatalf("got %d access units, want 3", len(aus))
@@ -55,6 +58,7 @@ func TestAccessUnitsSplitsOnDelimiterAndParameterSets(t *testing.T) {
 }
 
 func TestAccessUnitsMarkerBeforeVCLStaysWithItsPicture(t *testing.T) {
+	t.Parallel()
 	m := exampleMarkerNAL(t)
 	aus := collect(t, annexB(sps, pps, m, idr, m, nonIDR))
 	if len(aus) != 2 {
@@ -69,6 +73,7 @@ func TestAccessUnitsMarkerBeforeVCLStaysWithItsPicture(t *testing.T) {
 }
 
 func TestAccessUnitsThreeByteStartCodesAndNoTrailingStartCode(t *testing.T) {
+	t.Parallel()
 	stream := make([]byte, 0, 3+len(idr)+3+len(nonIDR))
 	stream = append(stream, 0, 0, 1)
 	stream = append(stream, idr...)
@@ -85,6 +90,7 @@ func TestAccessUnitsThreeByteStartCodesAndNoTrailingStartCode(t *testing.T) {
 }
 
 func TestAccessUnitsIgnoresLeadingGarbageAndEmptyInput(t *testing.T) {
+	t.Parallel()
 	stream := append([]byte{0xaa, 0xbb}, annexB(idr)...)
 	if aus := collect(t, stream); len(aus) != 1 {
 		t.Fatalf("got %d access units, want 1", len(aus))
@@ -106,6 +112,7 @@ func (f *failingReader) Read(p []byte) (int, error) {
 }
 
 func TestAccessUnitsReportsReadError(t *testing.T) {
+	t.Parallel()
 	var sawErr bool
 	for _, err := range AccessUnits(&failingReader{n: 1}) {
 		if err != nil {
@@ -118,6 +125,7 @@ func TestAccessUnitsReportsReadError(t *testing.T) {
 }
 
 func TestAccessUnitsStopsWhenConsumerStops(t *testing.T) {
+	t.Parallel()
 	count := 0
 	for range AccessUnits(bytes.NewReader(annexB(idr, nonIDR, nonIDRMore))) {
 		count++

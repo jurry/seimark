@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"math"
 
 	"github.com/Eyevinn/mp4ff/mp4"
 )
@@ -80,10 +81,13 @@ func editListOffset(moov *mp4.MoovBox, trak *mp4.TrakBox) int64 {
 		return 0
 	}
 	e := trak.Edts.Elst[0].Entries[0]
-	switch {
-	case e.MediaTime > 0:
+	if e.MediaTime > 0 {
 		return -e.MediaTime
-	case e.MediaTime < 0 && moov.Mvhd != nil && moov.Mvhd.Timescale != 0:
+	}
+	if e.MediaTime < 0 && moov.Mvhd != nil && moov.Mvhd.Timescale != 0 {
+		if e.SegmentDuration > math.MaxInt64 {
+			return 0
+		}
 		return int64(e.SegmentDuration) * int64(trak.Mdia.Mdhd.Timescale) / int64(moov.Mvhd.Timescale)
 	}
 	return 0
@@ -117,12 +121,19 @@ func progressiveSamples(f *mp4.File, trak *mp4.TrakBox, timescale uint32, editOf
 			return
 		}
 		dts, _ := stbl.Stts.GetDecodeTime(uint32(nr))
+		if dts > math.MaxInt64 {
+			yield(Sample{}, fmt.Errorf("seimark: sample %d: decode time %d overflows int64", nr, dts))
+			return
+		}
 		var cto int32
 		if stbl.Ctts != nil {
 			cto = stbl.Ctts.GetCompositionTimeOffset(uint32(nr))
 		}
 		sync := stbl.Stss == nil || stbl.Stss.IsSyncSample(uint32(nr))
-		s := Sample{Index: nr - 1, DTS: dts, PTS: int64(dts) + int64(cto) + editOffset, Timescale: timescale, Sync: sync, Data: data}
+		s := Sample{
+			Index: nr - 1, DTS: dts, PTS: int64(dts) + int64(cto) + editOffset,
+			Timescale: timescale, Sync: sync, Data: data,
+		}
 		if !yield(s, nil) {
 			return
 		}
@@ -133,7 +144,11 @@ func progressiveSamples(f *mp4.File, trak *mp4.TrakBox, timescale uint32, editOf
 // a range ending exactly at the end of mdat, so the last sample of a file whose
 // samples fill the box would be unreadable through it.
 func sampleData(mdat *mp4.MdatBox, start, size int64) ([]byte, error) {
-	begin := start - int64(mdat.PayloadAbsoluteOffset())
+	payloadOffset := mdat.PayloadAbsoluteOffset()
+	if payloadOffset > math.MaxInt64 {
+		return nil, fmt.Errorf("mdat payload offset %d overflows int64", payloadOffset)
+	}
+	begin := start - int64(payloadOffset)
 	end := begin + size
 	if begin < 0 || size < 0 || end > int64(len(mdat.Data)) {
 		return nil, fmt.Errorf("range %d+%d outside mdat payload of %d bytes", begin, size, len(mdat.Data))
@@ -146,12 +161,18 @@ func chunkOffset(stbl *mp4.StblBox, chunkNr int) (int64, error) {
 	case stbl.Stco != nil:
 		return int64(stbl.Stco.ChunkOffset[chunkNr-1]), nil
 	case stbl.Co64 != nil:
-		return int64(stbl.Co64.ChunkOffset[chunkNr-1]), nil
+		offset := stbl.Co64.ChunkOffset[chunkNr-1]
+		if offset > math.MaxInt64 {
+			return 0, fmt.Errorf("chunk offset %d overflows int64", offset)
+		}
+		return int64(offset), nil
 	}
 	return 0, fmt.Errorf("%w: neither stco nor co64", ErrNoVideoTrack)
 }
 
-func fragmentedSamples(f *mp4.File, moov *mp4.MoovBox, trak *mp4.TrakBox, timescale uint32, editOffset int64, yield func(Sample, error) bool) {
+func fragmentedSamples(
+	f *mp4.File, moov *mp4.MoovBox, trak *mp4.TrakBox, timescale uint32, editOffset int64, yield func(Sample, error) bool,
+) {
 	var trex *mp4.TrexBox
 	if moov.Mvex != nil {
 		trex, _ = moov.Mvex.GetTrex(trak.Tkhd.TrackID)
@@ -166,7 +187,10 @@ func fragmentedSamples(f *mp4.File, moov *mp4.MoovBox, trak *mp4.TrakBox, timesc
 			}
 			for i := range samples {
 				fs := &samples[i]
-				s := Sample{Index: index, DTS: fs.DecodeTime, PTS: fs.PresentationTime() + editOffset, Timescale: timescale, Sync: fs.IsSync(), Data: fs.Data}
+				s := Sample{
+					Index: index, DTS: fs.DecodeTime, PTS: fs.PresentationTime() + editOffset,
+					Timescale: timescale, Sync: fs.IsSync(), Data: fs.Data,
+				}
 				if !yield(s, nil) {
 					return
 				}
