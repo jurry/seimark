@@ -69,7 +69,8 @@ func TestAccessUnitsMarkerBeforeVCLStaysWithItsPicture(t *testing.T) {
 }
 
 func TestAccessUnitsThreeByteStartCodesAndNoTrailingStartCode(t *testing.T) {
-	stream := []byte{0, 0, 1}
+	stream := make([]byte, 0, 3+len(idr)+3+len(nonIDR))
+	stream = append(stream, 0, 0, 1)
 	stream = append(stream, idr...)
 	stream = append(stream, 0, 0, 1)
 	stream = append(stream, nonIDR...)

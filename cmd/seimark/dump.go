@@ -49,34 +49,36 @@ func runDump(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if fs.NArg() != 1 {
-		fmt.Fprintln(stderr, "seimark dump: exactly one FILE is required")
+		_, _ = fmt.Fprintln(stderr, "seimark dump: exactly one FILE is required")
 		return 2
 	}
 	if *out != "jsonl" && *out != "csv" {
-		fmt.Fprintf(stderr, "seimark dump: -out must be jsonl or csv, got %q\n", *out)
+		_, _ = fmt.Fprintf(stderr, "seimark dump: -out must be jsonl or csv, got %q\n", *out)
 		return 2
 	}
 	if *format != "auto" && *format != "annexb" && *format != "mp4" {
-		fmt.Fprintf(stderr, "seimark dump: -format must be auto, annexb or mp4, got %q\n", *format)
+		_, _ = fmt.Fprintf(stderr, "seimark dump: -format must be auto, annexb or mp4, got %q\n", *format)
 		return 2
 	}
 	path := fs.Arg(0)
 	f, err := os.Open(path)
 	if err != nil {
-		fmt.Fprintf(stderr, "seimark dump: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "seimark dump: %v\n", err)
 		return 1
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if *format == "auto" {
 		*format, err = sniff(f)
 		if err != nil {
-			fmt.Fprintf(stderr, "seimark dump: %v; pass -format\n", err)
+			_, _ = fmt.Fprintf(stderr, "seimark dump: %v; pass -format\n", err)
 			return 2
 		}
 	}
 	w := newRecordWriter(*out, stdout)
-	warn := func(au int, err error) { fmt.Fprintf(stderr, "seimark dump: access unit %d: %v\n", au, err) }
+	warn := func(au int, err error) {
+		_, _ = fmt.Fprintf(stderr, "seimark dump: access unit %d: %v\n", au, err)
+	}
 	var walkErr error
 	switch *format {
 	case "annexb":
@@ -85,11 +87,11 @@ func runDump(args []string, stdout, stderr io.Writer) int {
 		walkErr = dumpMP4(f, w, *all, warn)
 	}
 	if err := w.flush(); err != nil {
-		fmt.Fprintf(stderr, "seimark dump: write: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "seimark dump: write: %v\n", err)
 		return 1
 	}
 	if walkErr != nil {
-		fmt.Fprintf(stderr, "seimark dump: %v\n", walkErr)
+		_, _ = fmt.Fprintf(stderr, "seimark dump: %v\n", walkErr)
 		return 1
 	}
 	return 0

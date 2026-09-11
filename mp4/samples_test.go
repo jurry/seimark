@@ -16,7 +16,7 @@ func openFixture(t *testing.T, name string) *os.File {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { f.Close() })
+	t.Cleanup(func() { _ = f.Close() })
 	return f
 }
 
@@ -60,7 +60,7 @@ func checkFixture(t *testing.T, samples []Sample) {
 		}
 	}
 	// 100 ms apart at the track timescale.
-	step := int64(samples[1].PTS - samples[0].PTS)
+	step := samples[1].PTS - samples[0].PTS
 	if step != int64(samples[0].Timescale)/10 {
 		t.Errorf("PTS step %d, want %d", step, samples[0].Timescale/10)
 	}

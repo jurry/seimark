@@ -1,12 +1,15 @@
 export CGO_ENABLED=0
 
-.PHONY: test vet fmt-check build vectors
+.PHONY: test vet lint fmt-check build vectors
 
 test:
 	go test ./...
 
 vet:
 	go vet ./...
+
+lint:
+	golangci-lint run ./...
 
 fmt-check:
 	@out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
