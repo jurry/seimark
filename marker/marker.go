@@ -90,3 +90,25 @@ func Decode(body []byte) (Marker, error) {
 func IsFormatUUID(uuid []byte) bool {
 	return len(uuid) == 16 && [16]byte(uuid) == FormatUUID
 }
+
+// Encode returns the marker body. The payload flag is set when Payload is non-nil.
+// OriginTime is rounded to microseconds.
+func (m Marker) Encode() ([]byte, error) {
+	if len(m.Payload) > PayloadHardLimit {
+		return nil, fmt.Errorf("%w: %d", ErrPayloadTooLarge, len(m.Payload))
+	}
+	out := make([]byte, FixedSize, FixedSize+2+len(m.Payload))
+	out[0] = Version
+	if m.TimeSource == TimeCapture {
+		out[1] |= flagTimeCapture
+	}
+	binary.BigEndian.PutUint64(out[2:10], uint64(m.OriginTime.UnixMicro()))
+	binary.BigEndian.PutUint32(out[10:14], m.Sequence)
+	copy(out[14:22], m.StreamID[:])
+	if m.Payload != nil {
+		out[1] |= flagPayload
+		out = binary.BigEndian.AppendUint16(out, uint16(len(m.Payload)))
+		out = append(out, m.Payload...)
+	}
+	return out, nil
+}

@@ -1,6 +1,7 @@
 package marker
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"strings"
@@ -126,5 +127,70 @@ func TestIsFormatUUID(t *testing.T) {
 func TestTimeSourceString(t *testing.T) {
 	if TimeSend.String() != "send" || TimeCapture.String() != "capture" {
 		t.Fatalf("String() = %q, %q", TimeSend, TimeCapture)
+	}
+}
+
+func TestEncodeExample(t *testing.T) {
+	got, err := exampleMarker().Encode()
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	if want := unhex(t, exampleBodyHex); !bytes.Equal(got, want) {
+		t.Fatalf("got %x\nwant %x", got, want)
+	}
+}
+
+func TestEncodeCaptureWithPayload(t *testing.T) {
+	m := exampleMarker()
+	m.TimeSource = TimeCapture
+	m.Sequence = 7
+	m.Payload = []byte("hello")
+	got, err := m.Encode()
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	want := unhex(t, "01 03 00 06 5b 3b 5e 16 94 00 00 00 00 07 9f 3c 1a 77 e2 b0 4d 51 00 05 68 65 6c 6c 6f")
+	if !bytes.Equal(got, want) {
+		t.Fatalf("got %x\nwant %x", got, want)
+	}
+}
+
+func TestEncodeEmptyPayloadSetsFlag(t *testing.T) {
+	m := exampleMarker()
+	m.Payload = []byte{}
+	got, err := m.Encode()
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	if got[1]&0x02 == 0 || len(got) != FixedSize+2 {
+		t.Fatalf("got %x, want payload flag and a zero length", got)
+	}
+}
+
+func TestEncodePayloadTooLarge(t *testing.T) {
+	m := exampleMarker()
+	m.Payload = make([]byte, PayloadHardLimit+1)
+	if _, err := m.Encode(); !errors.Is(err, ErrPayloadTooLarge) {
+		t.Fatalf("err = %v, want ErrPayloadTooLarge", err)
+	}
+	m.Payload = make([]byte, PayloadHardLimit)
+	if _, err := m.Encode(); err != nil {
+		t.Fatalf("hard limit itself rejected: %v", err)
+	}
+}
+
+func TestRoundTripRoundsToMicroseconds(t *testing.T) {
+	m := exampleMarker()
+	m.OriginTime = m.OriginTime.Add(1500 * time.Nanosecond)
+	body, err := m.Encode()
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	got, err := Decode(body)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if want := m.OriginTime.Truncate(time.Microsecond); !got.OriginTime.Equal(want) {
+		t.Fatalf("OriginTime = %v, want %v", got.OriginTime, want)
 	}
 }
