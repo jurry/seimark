@@ -11,9 +11,11 @@ files, and `seimark dump` prints them. There is no writer and no browser
 library yet. The format is specified in [`docs/format.md`](docs/format.md);
 the roadmap is in [`specs/roadmap.md`](specs/roadmap.md).
 
+The module is not public yet, so build it from a clone:
+
 ```
-go install github.com/jurry/seimark/cmd/seimark@latest
-seimark dump recording.mp4
+go build -o seimark ./cmd/seimark
+./seimark dump recording.mp4
 ```
 
 ## What it will be
