@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -12,19 +11,14 @@ import (
 	"strings"
 
 	"github.com/Eyevinn/mp4ff/avc"
-	"github.com/Eyevinn/mp4ff/sei"
 
 	"github.com/jurry/seimark/h264"
-	"github.com/jurry/seimark/marker"
 	"github.com/jurry/seimark/mp4"
 )
 
 // originTimeLayout is RFC 3339 with six fractional digits, as dump and nals
 // both print an origin time.
 const originTimeLayout = "2006-01-02T15:04:05.000000Z07:00"
-
-// naluHeaderSize is the one-byte NAL unit header the SEI RBSP follows.
-const naluHeaderSize = 1
 
 // parseNalsFlags parses and validates args the way parseDumpFlags does, minus
 // the output options nals has no use for.
@@ -172,14 +166,18 @@ func printNALUnits(w io.Writer, au []byte, f h264.Format) error {
 
 // seiSummary describes the messages of one SEI NAL unit, or says it does not parse.
 func seiSummary(nal []byte) string {
-	msgs, err := sei.ExtractSEIData(bytes.NewReader(nal[naluHeaderSize:]))
-	if err != nil && len(msgs) == 0 {
+	msgs, err := h264.SEIMessages(nal)
+	if errors.Is(err, h264.ErrUnparsableSEI) {
 		return "unparsable"
 	}
 
-	parts := make([]string, 0, len(msgs))
+	parts := make([]string, 0, len(msgs)+1)
 	for i := range msgs {
 		parts = append(parts, messageSummary(&msgs[i]))
+	}
+
+	if err != nil {
+		parts = append(parts, fmt.Sprintf("seimark undecodable: %v", err))
 	}
 
 	return strings.Join(parts, " ")
@@ -187,22 +185,16 @@ func seiSummary(nal []byte) string {
 
 // messageSummary names one SEI message: a decoded seimark marker, a foreign
 // unregistered UUID, or the bare message type.
-func messageSummary(msg *sei.SEIData) string {
-	payload := msg.Payload()
-
-	if msg.Type() != sei.SEIUserDataUnregisteredType || len(payload) < marker.UUIDSize {
-		return fmt.Sprintf("type=%d", msg.Type())
+func messageSummary(msg *h264.SEIMessage) string {
+	if !msg.HasUUID {
+		return fmt.Sprintf("type=%d", msg.Type)
 	}
 
-	uuid := payload[:marker.UUIDSize]
-	if !marker.IsFormatUUID(uuid) {
-		return "user_data_unregistered uuid=" + hex.EncodeToString(uuid)
+	if msg.Marker == nil {
+		return "user_data_unregistered uuid=" + hex.EncodeToString(msg.UUID[:])
 	}
 
-	m, err := marker.Decode(payload[marker.UUIDSize:])
-	if err != nil {
-		return fmt.Sprintf("seimark undecodable: %v", err)
-	}
+	m := msg.Marker
 
 	return fmt.Sprintf("seimark seq=%d time=%s stream=%s payload=%d",
 		m.Sequence, m.OriginTime.UTC().Format(originTimeLayout), hex.EncodeToString(m.StreamID[:]), len(m.Payload))

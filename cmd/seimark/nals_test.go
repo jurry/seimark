@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -48,6 +50,37 @@ func TestNalsMP4Fixture(t *testing.T) {
 	text := out.String()
 	if !strings.HasPrefix(text, "au 0 dts 0 pts 0\n") || strings.Count(text, "seimark seq=") != 20 {
 		t.Fatalf("unexpected output:\n%s", text[:200])
+	}
+}
+
+func TestNalsOneByteSEIIsUnparsableAndDumpAgrees(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "tiny-sei.h264")
+	stream := []byte{0, 0, 0, 1, 0x06, 0, 0, 0, 1, 0x65, 0x88, 0x84, 0x00, 0x33, 0xff}
+
+	if err := os.WriteFile(path, stream, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	if code := run([]string{"nals", path}, &out, &errOut); code != 0 {
+		t.Fatalf("nals exit %d: %s", code, errOut.String())
+	}
+
+	if !strings.Contains(out.String(), "unparsable") {
+		t.Fatalf("nals output:\n%s", out.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+
+	if code := run([]string{"dump", "-all", path}, &out, &errOut); code != 0 {
+		t.Fatalf("dump exit %d: %s", code, errOut.String())
+	}
+
+	if strings.Contains(out.String(), `"sequence"`) {
+		t.Fatalf("dump reported a marker:\n%s", out.String())
 	}
 }
 

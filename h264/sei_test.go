@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Eyevinn/mp4ff/sei"
+
 	"github.com/jurry/seimark/marker"
 )
 
@@ -216,5 +218,53 @@ func TestMarkersUnparsableSEIIsReported(t *testing.T) {
 
 	if len(got) != 1 {
 		t.Fatalf("got %d markers, want 1", len(got))
+	}
+}
+
+func TestSEIMessagesDecodesTheSpecExample(t *testing.T) {
+	t.Parallel()
+
+	got, err := SEIMessages(exampleMarkerNAL(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got) != 1 {
+		t.Fatalf("got %d messages, want 1", len(got))
+	}
+
+	m := got[0]
+	if m.Type != uint(sei.SEIUserDataUnregisteredType) || !m.HasUUID || m.UUID != marker.FormatUUID() {
+		t.Fatalf("message %+v", m)
+	}
+
+	if m.Marker == nil || m.Marker.Sequence != 0 {
+		t.Fatalf("marker %+v", m.Marker)
+	}
+}
+
+func TestSEIMessagesForeignUserDataHasNoMarker(t *testing.T) {
+	t.Parallel()
+
+	got, err := SEIMessages(foreignSEINAL(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got) != 1 || !got[0].HasUUID || got[0].Marker != nil {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestSEIMessagesUnparsableNAL(t *testing.T) {
+	t.Parallel()
+
+	got, err := SEIMessages([]byte{0x06})
+	if !errors.Is(err, ErrUnparsableSEI) {
+		t.Fatalf("err = %v, want ErrUnparsableSEI", err)
+	}
+
+	if got != nil {
+		t.Fatalf("got %+v, want none", got)
 	}
 }

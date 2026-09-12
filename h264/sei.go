@@ -31,6 +31,72 @@ func UserDataSEINAL(uuid [marker.UUIDSize]byte, body []byte) ([]byte, error) {
 // and a caller that only wants those can ignore an error that is this one.
 var ErrUnparsableSEI = errors.New("seimark: SEI NAL unit does not parse")
 
+// SEIMessage is one message of one SEI NAL unit, classified far enough for a
+// caller to report it: the payload type, the unregistered UUID when there is
+// one, and the decoded seimark marker when the UUID is seimark's and the body
+// decodes.
+type SEIMessage struct {
+	Type    uint
+	UUID    [marker.UUIDSize]byte
+	HasUUID bool
+	Marker  *marker.Marker
+	Payload []byte
+}
+
+// SEIMessages returns the messages of one SEI NAL unit, header byte included.
+// A NAL unit that does not parse at all is ErrUnparsableSEI. A seimark message
+// whose body does not decode ends the walk with that error and the messages
+// found so far.
+func SEIMessages(nal []byte) ([]SEIMessage, error) {
+	if len(nal) < naluHeaderSize+1 {
+		return nil, fmt.Errorf("%w: %d bytes", ErrUnparsableSEI, len(nal))
+	}
+
+	msgs, err := sei.ExtractSEIData(bytes.NewReader(nal[naluHeaderSize:]))
+	if err != nil && len(msgs) == 0 {
+		return nil, fmt.Errorf("%w: %w", ErrUnparsableSEI, err)
+	}
+
+	out := make([]SEIMessage, 0, len(msgs))
+
+	for i := range msgs {
+		m, err := classifySEIMessage(&msgs[i])
+		if err != nil {
+			return out, err
+		}
+
+		out = append(out, m)
+	}
+
+	return out, nil
+}
+
+// classifySEIMessage fills in the UUID and the marker of one message.
+func classifySEIMessage(msg *sei.SEIData) (SEIMessage, error) {
+	payload := msg.Payload()
+	out := SEIMessage{Type: msg.Type(), Payload: payload}
+
+	if msg.Type() != sei.SEIUserDataUnregisteredType || len(payload) < marker.UUIDSize {
+		return out, nil
+	}
+
+	copy(out.UUID[:], payload[:marker.UUIDSize])
+
+	out.HasUUID = true
+	if !marker.IsFormatUUID(payload[:marker.UUIDSize]) {
+		return out, nil
+	}
+
+	m, err := marker.Decode(payload[marker.UUIDSize:])
+	if err != nil {
+		return out, fmt.Errorf("seimark: marker in SEI NAL unit: %w", err)
+	}
+
+	out.Marker = &m
+
+	return out, nil
+}
+
 // Markers returns every seimark marker in the access unit, in order.
 // Unregistered messages with other UUIDs are skipped. An SEI NAL unit that does
 // not parse is skipped too, but the scan ends with ErrUnparsableSEI alongside
@@ -48,31 +114,27 @@ func Markers(au []byte, f Format) ([]marker.Marker, error) {
 	)
 
 	for _, nal := range nalus {
-		if len(nal) < 2 || avc.GetNaluType(nal[0]) != avc.NALU_SEI {
+		if len(nal) == 0 || avc.GetNaluType(nal[0]) != avc.NALU_SEI {
 			continue
 		}
 
-		msgs, err := sei.ExtractSEIData(bytes.NewReader(nal[1:]))
-		if err != nil && len(msgs) == 0 {
+		msgs, err := SEIMessages(nal)
+		if errors.Is(err, ErrUnparsableSEI) {
 			if unparsable == nil {
-				unparsable = fmt.Errorf("%w: %w", ErrUnparsableSEI, err)
+				unparsable = err
 			}
 
 			continue
 		}
 
 		for _, msg := range msgs {
-			payload := msg.Payload()
-			if msg.Type() != sei.SEIUserDataUnregisteredType || len(payload) < marker.UUIDSize || !marker.IsFormatUUID(payload[:marker.UUIDSize]) {
-				continue
+			if msg.Marker != nil {
+				found = append(found, *msg.Marker)
 			}
+		}
 
-			m, err := marker.Decode(payload[marker.UUIDSize:])
-			if err != nil {
-				return found, fmt.Errorf("seimark: marker in SEI NAL unit: %w", err)
-			}
-
-			found = append(found, m)
+		if err != nil {
+			return found, err
 		}
 	}
 

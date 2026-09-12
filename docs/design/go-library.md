@@ -68,8 +68,17 @@ var (
     ErrUnparsableSEI error
 )
 
+type SEIMessage struct {
+    Type    uint
+    UUID    [marker.UUIDSize]byte
+    HasUUID bool
+    Marker  *marker.Marker
+    Payload []byte
+}
+
 func DetectFormat(au []byte) Format
 func NALUnits(au []byte, f Format) ([][]byte, error)
+func SEIMessages(nal []byte) ([]SEIMessage, error)          // error may wrap ErrUnparsableSEI
 func Markers(au []byte, f Format) ([]marker.Marker, error)  // error may wrap ErrUnparsableSEI
 func AccessUnits(r io.Reader) iter.Seq2[[]byte, error]
 ```
@@ -77,7 +86,8 @@ func AccessUnits(r io.Reader) iter.Seq2[[]byte, error]
 - **Format detection.** A leading `00 00 01` or `00 00 00 01` is Annex B. Otherwise, if the first four bytes read as a big-endian length between 1 and `len(au) - 4`, the unit is length-prefixed. Anything else is unknown, and `Markers` returns an error for it. Callers that know the format pass it and skip detection.
 - **NAL units.** Annex B splitting uses mp4ff `avc.ExtractNalusFromByteStream`. Length-prefixed splitting is our own walker: a four-byte big-endian length, required to be at least 1 and no larger than the bytes left, otherwise an error naming the byte offset. mp4ff `avc.GetNalusFromSample` is not used because it panics on a corrupt length. Returned slices are subslices of `au`.
 - **Building a marker NAL unit.** `UserDataSEINAL(uuid [16]byte, body []byte) ([]byte, error)` wraps mp4ff `avc.CreateSEINalu` with one `user_data_unregistered` message. It exists in phase 1 for the fixture generator and the tests; the phase 2 writer builds on it. Verified against the worked example in `docs/format.md`: mp4ff produces the same 44 bytes.
-- **Markers.** For every NAL unit of type 6: drop the header byte, run mp4ff `sei.ExtractSEIData`, take messages of type 5, compare the first 16 payload bytes with `marker.FormatUUID()`, `marker.Decode` the rest. Foreign SEI and foreign unregistered UUIDs are skipped without error. An SEI NAL unit mp4ff cannot parse is skipped but not hidden: the scan finishes and returns the markers found together with an error wrapping the exported `ErrUnparsableSEI`, which callers can test with `errors.Is` and treat as advisory — the CLI warns on it and keeps going. A message with the seimark UUID that fails to decode ends the scan at once and returns the markers found so far with that error. The order of the result is the order in the access unit.
+- **SEI messages.** `SEIMessages` classifies the messages of one SEI NAL unit, header byte included: it drops the header byte, runs mp4ff `sei.ExtractSEIData`, and for every message records the payload type, the unregistered UUID where there is one, and the decoded seimark marker where the UUID is seimark's. A NAL unit too short to hold an RBSP, or one mp4ff cannot parse, is `ErrUnparsableSEI`. `Markers` and `seimark nals` are both built on it, so there is one walk and the two commands cannot disagree.
+- **Markers.** For every NAL unit of type 6: `SEIMessages`, then keep the decoded markers. Foreign SEI and foreign unregistered UUIDs are skipped without error. An SEI NAL unit mp4ff cannot parse is skipped but not hidden: the scan finishes and returns the markers found together with an error wrapping the exported `ErrUnparsableSEI`, which callers can test with `errors.Is` and treat as advisory — the CLI warns on it and keeps going. A message with the seimark UUID that fails to decode ends the scan at once and returns the markers found so far with that error. The order of the result is the order in the access unit.
 - **Access units from a byte stream.** `AccessUnits` reads an Annex B stream incrementally through a `bufio.Reader`, finds start codes, and groups NAL units into access units with the standard rule and no exception: once the current access unit contains a VCL NAL unit (types 1 to 5), the next NAL unit starts a new access unit if it is an access-unit delimiter, SPS, PPS or SEI, or if it is a VCL NAL unit whose `first_mb_in_slice` is zero. `first_mb_in_slice` is the first Exp-Golomb value after the header; it is zero exactly when the first bit of the byte after the header is 1, so the check is `nal[1] & 0x80 != 0`. Each yielded access unit is Annex B bytes with four-byte start codes, valid input for `Markers` with `FormatAnnexB`. A read error ends the sequence with that error; a final access unit without a trailing start code is yielded before the sequence ends. Leading bytes before the first start code are ignored.
 
 ## `mp4`
