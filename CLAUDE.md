@@ -40,4 +40,7 @@ Every document states its type, LIVING or SNAPSHOT, under its title. No "Update:
 
 - Never commit or push without explicit approval for the specific change. Show the diff, then wait.
 - Approval of a design or a plan is not approval to commit code.
-- One logical change per commit, with a message that says why.
+- One logical change per commit on a feature branch, with a message that says why. Feature-branch commits are free-form.
+- One pull request per phase, squash-merged. The PR description carries a summary of what is in and out, notes for the reviewer, and the list of branch commits. The squash commit message is the PR title and body.
+- Squash commit titles follow Conventional Commits: `feat:`, `fix:`, `docs:`, `ci:`, `chore:`, `refactor:`, `test:`. Example: `feat: read markers from Annex B and MP4, add seimark dump`.
+- No tool attribution trailers in commit messages.
