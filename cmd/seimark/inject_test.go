@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Eyevinn/mp4ff/avc"
 
 	"github.com/jurry/seimark/h264"
 )
@@ -293,6 +296,41 @@ func TestInjectNoRateIsAUsageError(t *testing.T) {
 
 	if code := run([]string{"inject", "-fps", "25", in, filepath.Join(t.TempDir(), "out.h264")}, &stdout, &stderr); code != 0 {
 		t.Fatalf("with -fps: exit %d: %s", code, stderr.String())
+	}
+}
+
+func TestInjectRejectsUnusableFPS(t *testing.T) {
+	t.Parallel()
+
+	in := strippedFixture(t)
+
+	for _, fps := range []string{"NaN", "Inf", "+Inf", "-Inf", "0", "-1"} {
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"inject", "-fps", fps, in, filepath.Join(t.TempDir(), "out.h264")}, &stdout, &stderr); code != 2 {
+			t.Errorf("-fps %s: exit %d, want 2; stderr: %s", fps, code, stderr.String())
+		}
+	}
+}
+
+func TestRateFromSPSValueNeedsTiming(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]avc.SPS{
+		"no VUI":          {},
+		"flag clear":      {VUI: &avc.VUIParameters{TimeScale: 20, NumUnitsInTick: 1}},
+		"zero time scale": {VUI: &avc.VUIParameters{TimingInfoPresentFlag: true, TimeScale: 0, NumUnitsInTick: 1}},
+		"zero units":      {VUI: &avc.VUIParameters{TimingInfoPresentFlag: true, TimeScale: 20, NumUnitsInTick: 0}},
+	}
+
+	for name, sps := range cases {
+		if _, err := rateFromSPSValue(&sps); !errors.Is(err, errNoRate) {
+			t.Errorf("%s: err = %v, want errNoRate", name, err)
+		}
+	}
+
+	rate, err := rateFromSPSValue(&avc.SPS{VUI: &avc.VUIParameters{TimingInfoPresentFlag: true, TimeScale: 20, NumUnitsInTick: 1}})
+	if err != nil || rate != 10 {
+		t.Fatalf("rate = %v, err = %v, want 10", rate, err)
 	}
 }
 

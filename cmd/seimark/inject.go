@@ -78,13 +78,33 @@ func parseInjectFlags(args []string, stderr io.Writer) (flags injectFlags, exitC
 		return injectFlags{}, exitUsage, false
 	}
 
-	if *fps < 0 {
-		fmt.Fprintf(stderr, "seimark inject: -fps must be positive, got %v\n", *fps)
+	if fpsGiven(fs) && !usableRate(*fps) {
+		fmt.Fprintf(stderr, "seimark inject: -fps must be a finite positive number, got %v\n", *fps)
 
 		return injectFlags{}, exitUsage, false
 	}
 
 	return flags, exitOK, true
+}
+
+// fpsGiven reports whether -fps was on the command line, so that an explicit
+// -fps 0 is rejected rather than read as "let the SPS decide".
+func fpsGiven(fs *flag.FlagSet) bool {
+	given := false
+
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "fps" {
+			given = true
+		}
+	})
+
+	return given
+}
+
+// usableRate rejects the frame rates that make the time of unit i meaningless:
+// not a number, infinite, or not above zero.
+func usableRate(rate float64) bool {
+	return !math.IsNaN(rate) && !math.IsInf(rate, 0) && rate > 0
 }
 
 func parseStart(s string) (time.Time, error) {
@@ -225,17 +245,32 @@ func rateFromSPS(in io.ReadSeeker) (float64, error) {
 			}
 
 			sps, err := avc.ParseSPSNALUnit(nal, true)
-			if err != nil || sps.VUI == nil || !sps.VUI.TimingInfoPresentFlag || sps.VUI.NumUnitsInTick == 0 {
+			if err != nil {
 				return 0, errNoRate
 			}
 
-			return float64(sps.VUI.TimeScale) / (fieldsPerFrameRate * float64(sps.VUI.NumUnitsInTick)), nil
+			return rateFromSPSValue(sps)
 		}
 
 		break
 	}
 
 	return 0, errNoRate
+}
+
+// rateFromSPSValue turns one parsed SPS's VUI timing into a frame rate. Timing
+// that is absent, or that divides by zero, is no rate at all.
+func rateFromSPSValue(sps *avc.SPS) (float64, error) {
+	if sps.VUI == nil || !sps.VUI.TimingInfoPresentFlag || sps.VUI.NumUnitsInTick == 0 || sps.VUI.TimeScale == 0 {
+		return 0, errNoRate
+	}
+
+	rate := float64(sps.VUI.TimeScale) / (fieldsPerFrameRate * float64(sps.VUI.NumUnitsInTick))
+	if !usableRate(rate) {
+		return 0, errNoRate
+	}
+
+	return rate, nil
 }
 
 // markOne marks one access unit, reporting to stderr and returning ok=false on
