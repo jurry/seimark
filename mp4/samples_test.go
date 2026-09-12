@@ -2,6 +2,7 @@ package mp4
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"os"
 	"path/filepath"
@@ -98,4 +99,72 @@ func TestVideoSamplesGarbage(t *testing.T) {
 	if sawErr == nil {
 		t.Fatal("garbage accepted")
 	}
+}
+
+// fixtureBytes returns the progressive fixture's bytes for a test to corrupt.
+func fixtureBytes(t *testing.T) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("..", "vectors", "streams", "testsrc-marked.mp4"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// boxPayload returns the offset of the first payload byte of the named box.
+func boxPayload(t *testing.T, data []byte, typ string) int {
+	t.Helper()
+	i := bytes.Index(data, []byte(typ))
+	if i < 4 {
+		t.Fatalf("box %s not found", typ)
+	}
+	return i + 4
+}
+
+func collectErr(t *testing.T, data []byte) error {
+	t.Helper()
+	var sawErr error
+	for _, err := range VideoSamples(bytes.NewReader(data)) {
+		if err != nil {
+			sawErr = err
+		}
+	}
+	return sawErr
+}
+
+func TestVideoSamplesSttsShorterThanStsz(t *testing.T) {
+	t.Parallel()
+	data := fixtureBytes(t)
+	// stts: version+flags, entry count, then (sample count, delta) pairs.
+	p := boxPayload(t, data, "stts")
+	binary.BigEndian.PutUint32(data[p+8:p+12], 5) // 5 samples covered, stsz says 20
+	err := collectErr(t, data)
+	if !errors.Is(err, ErrMalformedFile) {
+		t.Fatalf("err = %v, want ErrMalformedFile", err)
+	}
+}
+
+func TestVideoSamplesEmptyStco(t *testing.T) {
+	t.Parallel()
+	data := fixtureBytes(t)
+	p := boxPayload(t, data, "stco")
+	// Drop the single offset: entry count to 0, box and its parents four bytes
+	// shorter, so mp4ff decodes a well-formed but empty table.
+	binary.BigEndian.PutUint32(data[p+4:p+8], 0)
+	data = append(data[:p+8:p+8], data[p+12:]...)
+	shrinkBox(t, data, "stco", 4)
+	for _, parent := range []string{"stbl", "minf", "mdia", "trak", "moov"} {
+		shrinkBox(t, data, parent, 4)
+	}
+	err := collectErr(t, data)
+	if !errors.Is(err, ErrMalformedFile) {
+		t.Fatalf("err = %v, want ErrMalformedFile", err)
+	}
+}
+
+// shrinkBox subtracts n from the size field of the named box.
+func shrinkBox(t *testing.T, data []byte, typ string, n uint32) {
+	t.Helper()
+	p := boxPayload(t, data, typ) - 8
+	binary.BigEndian.PutUint32(data[p:p+4], binary.BigEndian.Uint32(data[p:p+4])-n)
 }

@@ -88,6 +88,7 @@ type Sample struct {
 }
 
 var ErrNoVideoTrack error
+var ErrMalformedFile error
 
 func VideoSamples(r io.ReadSeeker) iter.Seq2[Sample, error]
 ```
@@ -95,6 +96,7 @@ func VideoSamples(r io.ReadSeeker) iter.Seq2[Sample, error]
 - Decodes the file with mp4ff `mp4.DecodeFile` in normal mode, which reads the file into memory. Lazy mdat reading is a later improvement; phase 1 fixtures are small and the API does not change.
 - Picks the first track whose handler is `vide` and whose sample entry is `avc1` or `avc3`. Any other sample entry is `ErrNoVideoTrack` with the entry name in the message.
 - Progressive files: iterate with the stbl helpers the way mp4ff's own `mp4ff-nallister` does: `Stsz` for count and size, `Stsc.ChunkNrFromSampleNr` and `Stco` or `Co64` for the byte range, `Stts.GetDecodeTime`, `Ctts.GetCompositionTimeOffset` when present, `Stss` for sync (absent `Stss` means every sample is sync), `mdat.ReadData` for the bytes.
+- The tables are validated before the walk, because the mp4ff helpers index them without bounds checks and panic on a file whose tables disagree: `Stsd`, `Mdhd` and `Tkhd` must be present, `Stsc` must have an entry, `stco` or `co64` must be there, `stts` and, when present, `ctts` must cover at least `Stsz.SampleNumber` samples, and every chunk number `Stsc` produces must be in the offset table. A failure is `ErrMalformedFile`. Each sample is then built inside a function that recovers a panic from mp4ff and returns it as `ErrMalformedFile`, so an unforeseen index error is an error and not a crash.
 - Fragmented files: for every fragment, `GetFullSamples(trex)`; data, decode time, composition offset and the sync flag come from the full sample.
 - Edit list: only the first entry of the first `elst` is honoured. A positive media time is subtracted from every `PTS`; a media time of -1 (an empty edit) adds the entry's segment duration converted from the movie timescale to the track timescale. Anything more elaborate is out of scope.
 

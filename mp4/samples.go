@@ -21,7 +21,13 @@ type Sample struct {
 	Data      []byte
 }
 
-var ErrNoVideoTrack = errors.New("seimark: no H.264 video track")
+var (
+	ErrNoVideoTrack = errors.New("seimark: no H.264 video track")
+
+	// ErrMalformedFile marks sample tables that contradict each other or run
+	// short; the file parses as boxes but cannot be walked sample by sample.
+	ErrMalformedFile = errors.New("seimark: malformed mp4 sample tables")
+)
 
 // VideoSamples yields the samples of the first H.264 video track. The file is
 // read into memory; PTS honours the first edit-list entry only.
@@ -45,6 +51,10 @@ func VideoSamples(r io.ReadSeeker) iter.Seq2[Sample, error] {
 			yield(Sample{}, err)
 			return
 		}
+		if err := checkTrackBoxes(trak); err != nil {
+			yield(Sample{}, err)
+			return
+		}
 		timescale := trak.Mdia.Mdhd.Timescale
 		editOffset := editListOffset(moov, trak)
 		if f.IsFragmented() {
@@ -60,6 +70,9 @@ func h264Track(moov *mp4.MoovBox) (*mp4.TrakBox, error) {
 		if trak.Mdia == nil || trak.Mdia.Hdlr == nil || trak.Mdia.Hdlr.HandlerType != "vide" {
 			continue
 		}
+		if trak.Mdia.Minf == nil || trak.Mdia.Minf.Stbl == nil || trak.Mdia.Minf.Stbl.Stsd == nil {
+			return nil, fmt.Errorf("%w: video track has no stsd", ErrMalformedFile)
+		}
 		stsd := trak.Mdia.Minf.Stbl.Stsd
 		if stsd.AvcX == nil {
 			name := "unknown"
@@ -71,6 +84,19 @@ func h264Track(moov *mp4.MoovBox) (*mp4.TrakBox, error) {
 		return trak, nil
 	}
 	return nil, ErrNoVideoTrack
+}
+
+// checkTrackBoxes rejects a track missing a box the sample walk dereferences.
+func checkTrackBoxes(trak *mp4.TrakBox) error {
+	switch {
+	case trak.Mdia.Mdhd == nil:
+		return fmt.Errorf("%w: track has no mdhd", ErrMalformedFile)
+	case trak.Tkhd == nil:
+		return fmt.Errorf("%w: track has no tkhd", ErrMalformedFile)
+	case trak.Mdia.Minf == nil || trak.Mdia.Minf.Stbl == nil || trak.Mdia.Minf.Stbl.Stsd == nil:
+		return fmt.Errorf("%w: track has no stsd", ErrMalformedFile)
+	}
+	return nil
 }
 
 // editListOffset returns what to add to a sample's composition time to get its
@@ -99,45 +125,115 @@ func progressiveSamples(f *mp4.File, trak *mp4.TrakBox, timescale uint32, editOf
 		yield(Sample{}, fmt.Errorf("%w: sample tables incomplete", ErrNoVideoTrack))
 		return
 	}
-	n := int(stbl.Stsz.SampleNumber)
-	for nr := 1; nr <= n; nr++ {
-		chunkNr, firstInChunk, err := stbl.Stsc.ChunkNrFromSampleNr(nr)
-		if err != nil {
-			yield(Sample{}, fmt.Errorf("seimark: sample %d: %w", nr, err))
-			return
-		}
-		offset, err := chunkOffset(stbl, chunkNr)
+	if err := validateTables(stbl); err != nil {
+		yield(Sample{}, err)
+		return
+	}
+	n := stbl.Stsz.SampleNumber
+	for nr := uint32(1); nr <= n; nr++ {
+		s, err := progressiveSample(f, stbl, nr, timescale, editOffset)
 		if err != nil {
 			yield(Sample{}, err)
 			return
-		}
-		for s := firstInChunk; s < nr; s++ {
-			offset += int64(stbl.Stsz.GetSampleSize(s))
-		}
-		size := stbl.Stsz.GetSampleSize(nr)
-		data, err := sampleData(f.Mdat, offset, int64(size))
-		if err != nil {
-			yield(Sample{}, fmt.Errorf("seimark: sample %d data: %w", nr, err))
-			return
-		}
-		dts, _ := stbl.Stts.GetDecodeTime(uint32(nr))
-		if dts > math.MaxInt64 {
-			yield(Sample{}, fmt.Errorf("seimark: sample %d: decode time %d overflows int64", nr, dts))
-			return
-		}
-		var cto int32
-		if stbl.Ctts != nil {
-			cto = stbl.Ctts.GetCompositionTimeOffset(uint32(nr))
-		}
-		sync := stbl.Stss == nil || stbl.Stss.IsSyncSample(uint32(nr))
-		s := Sample{
-			Index: nr - 1, DTS: dts, PTS: int64(dts) + int64(cto) + editOffset,
-			Timescale: timescale, Sync: sync, Data: data,
 		}
 		if !yield(s, nil) {
 			return
 		}
 	}
+}
+
+// progressiveSample builds one sample. mp4ff's stbl helpers index their tables
+// without bounds checks, so a table this package has not thought to validate
+// panics there; recover turns that into an error rather than a crash.
+func progressiveSample(
+	f *mp4.File, stbl *mp4.StblBox, nr uint32, timescale uint32, editOffset int64,
+) (s Sample, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			s, err = Sample{}, fmt.Errorf("%w: sample %d: %v", ErrMalformedFile, nr, r)
+		}
+	}()
+	chunkNr, firstInChunk, err := stbl.Stsc.ChunkNrFromSampleNr(int(nr))
+	if err != nil {
+		return Sample{}, fmt.Errorf("seimark: sample %d: %w", nr, err)
+	}
+	offset, err := chunkOffset(stbl, chunkNr)
+	if err != nil {
+		return Sample{}, err
+	}
+	for i := firstInChunk; i < int(nr); i++ {
+		offset += int64(stbl.Stsz.GetSampleSize(i))
+	}
+	size := stbl.Stsz.GetSampleSize(int(nr))
+	data, err := sampleData(f.Mdat, offset, int64(size))
+	if err != nil {
+		return Sample{}, fmt.Errorf("seimark: sample %d data: %w", nr, err)
+	}
+	dts, _ := stbl.Stts.GetDecodeTime(nr)
+	if dts > math.MaxInt64 {
+		return Sample{}, fmt.Errorf("seimark: sample %d: decode time %d overflows int64", nr, dts)
+	}
+	var cto int32
+	if stbl.Ctts != nil {
+		cto = stbl.Ctts.GetCompositionTimeOffset(nr)
+	}
+	sync := stbl.Stss == nil || stbl.Stss.IsSyncSample(nr)
+	return Sample{
+		Index: int(nr) - 1, DTS: dts, PTS: int64(dts) + int64(cto) + editOffset,
+		Timescale: timescale, Sync: sync, Data: data,
+	}, nil
+}
+
+// validateTables checks the cross-table invariants progressiveSample relies on:
+// every sample must have a time, a chunk and a chunk offset.
+func validateTables(stbl *mp4.StblBox) error {
+	if len(stbl.Stsc.Entries) == 0 {
+		return fmt.Errorf("%w: stsc has no entries", ErrMalformedFile)
+	}
+	var chunks int
+	switch {
+	case stbl.Stco != nil:
+		chunks = len(stbl.Stco.ChunkOffset)
+	case stbl.Co64 != nil:
+		chunks = len(stbl.Co64.ChunkOffset)
+	default:
+		return fmt.Errorf("%w: neither stco nor co64", ErrMalformedFile)
+	}
+	n := int(stbl.Stsz.SampleNumber)
+	if covered := sttsSamples(stbl.Stts); covered < n {
+		return fmt.Errorf("%w: stts covers %d samples, stsz has %d", ErrMalformedFile, covered, n)
+	}
+	if stbl.Ctts != nil {
+		if covered := cttsSamples(stbl.Ctts); covered < n {
+			return fmt.Errorf("%w: ctts covers %d samples, stsz has %d", ErrMalformedFile, covered, n)
+		}
+	}
+	for nr := 1; nr <= n; nr++ {
+		chunkNr, _, err := stbl.Stsc.ChunkNrFromSampleNr(nr)
+		if err != nil {
+			return fmt.Errorf("%w: sample %d has no chunk: %w", ErrMalformedFile, nr, err)
+		}
+		if chunkNr < 1 || chunkNr > chunks {
+			return fmt.Errorf("%w: sample %d is in chunk %d of %d", ErrMalformedFile, nr, chunkNr, chunks)
+		}
+	}
+	return nil
+}
+
+func sttsSamples(stts *mp4.SttsBox) int {
+	total := 0
+	for _, c := range stts.SampleCount {
+		total += int(c)
+	}
+	return total
+}
+
+func cttsSamples(ctts *mp4.CttsBox) int {
+	total := 0
+	for i := range ctts.NrSampleCount() {
+		total += int(ctts.SampleCount(i))
+	}
+	return total
 }
 
 // sampleData slices the in-memory mdat payload. mp4ff v0.56.0 ReadData rejects
