@@ -168,3 +168,38 @@ func shrinkBox(t *testing.T, data []byte, typ string, n uint32) {
 	p := boxPayload(t, data, typ) - 8
 	binary.BigEndian.PutUint32(data[p:p+4], binary.BigEndian.Uint32(data[p:p+4])-n)
 }
+
+// lastBoxOffset returns the offset of the last top-level box of the given type
+// by walking the box headers from the start of the file.
+func lastBoxOffset(t *testing.T, data []byte, typ string) int {
+	t.Helper()
+	last := -1
+	for pos := 0; pos+8 <= len(data); {
+		size := int(binary.BigEndian.Uint32(data[pos : pos+4]))
+		if string(data[pos+4:pos+8]) == typ {
+			last = pos
+		}
+		if size < 8 {
+			break
+		}
+		pos += size
+	}
+	if last < 0 {
+		t.Fatalf("no %s box found", typ)
+	}
+	return last
+}
+
+func TestVideoSamplesFragmentWithoutMdat(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile(filepath.Join("..", "vectors", "streams", "testsrc-marked-frag.mp4"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	off := lastBoxOffset(t, data, "moof")
+	size := int(binary.BigEndian.Uint32(data[off : off+4]))
+	truncated := data[:off+size] // the last moof, with its mdat cut away
+	if gotErr := collectErr(t, truncated); !errors.Is(gotErr, ErrMalformedFile) {
+		t.Fatalf("err = %v, want ErrMalformedFile", gotErr)
+	}
+}

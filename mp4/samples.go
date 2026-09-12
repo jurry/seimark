@@ -276,6 +276,10 @@ func fragmentedSamples(
 	index := 0
 	for _, seg := range f.Segments {
 		for _, frag := range seg.Fragments {
+			if frag.Moof == nil || frag.Mdat == nil {
+				yield(Sample{}, fmt.Errorf("%w: fragment without mdat", ErrMalformedFile))
+				return
+			}
 			samples, err := frag.GetFullSamples(trex)
 			if err != nil {
 				yield(Sample{}, fmt.Errorf("seimark: fragment samples: %w", err))
