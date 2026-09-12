@@ -10,7 +10,7 @@ import (
 )
 
 // The worked example from docs/format.md.
-const exampleBodyHex = "01 00 00 06 5b 3b 5e 16 94 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51"
+const exampleBodyHex = "01 00 00 06 5b 4f 7b ed f4 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51"
 
 func unhex(t *testing.T, s string) []byte {
 	t.Helper()
@@ -24,7 +24,7 @@ func unhex(t *testing.T, s string) []byte {
 func exampleMarker() Marker {
 	return Marker{
 		TimeSource: TimeSend,
-		OriginTime: time.Date(2026, 9, 11, 21, 0, 0, 0, time.UTC),
+		OriginTime: time.Date(2026, 9, 12, 21, 0, 0, 0, time.UTC),
 		Sequence:   0,
 		StreamID:   [8]byte{0x9f, 0x3c, 0x1a, 0x77, 0xe2, 0xb0, 0x4d, 0x51},
 	}
@@ -48,7 +48,7 @@ func TestDecodeExample(t *testing.T) {
 
 func TestDecodeCaptureWithPayload(t *testing.T) {
 	t.Parallel()
-	body := unhex(t, "01 03 00 06 5b 3b 5e 16 94 00 00 00 00 07 9f 3c 1a 77 e2 b0 4d 51 00 05 68 65 6c 6c 6f")
+	body := unhex(t, "01 03 00 06 5b 4f 7b ed f4 00 00 00 00 07 9f 3c 1a 77 e2 b0 4d 51 00 05 68 65 6c 6c 6f")
 	got, err := Decode(body)
 	if err != nil {
 		t.Fatalf("Decode: %v", err)
@@ -70,7 +70,7 @@ func TestDecodeCaptureWithPayload(t *testing.T) {
 
 func TestDecodeEmptyPayloadIsPresent(t *testing.T) {
 	t.Parallel()
-	got, err := Decode(unhex(t, "01 02 00 06 5b 3b 5e 16 94 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51 00 00"))
+	got, err := Decode(unhex(t, "01 02 00 06 5b 4f 7b ed f4 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51 00 00"))
 	if err != nil {
 		t.Fatalf("Decode: %v", err)
 	}
@@ -99,11 +99,11 @@ func TestDecodeErrors(t *testing.T) {
 		body string
 		want error
 	}{
-		{"short", "01 00 00 06 5b 3b 5e 16 94 00", ErrTruncated},
+		{"short", "01 00 00 06 5b 4f 7b ed f4 00", ErrTruncated},
 		{"empty", "", ErrTruncated},
-		{"version 2", "02 00 00 06 5b 3b 5e 16 94 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51", ErrUnsupportedVersion},
-		{"payload flag without length", "01 02 00 06 5b 3b 5e 16 94 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51", ErrTruncated},
-		{"payload length overruns", "01 02 00 06 5b 3b 5e 16 94 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51 00 10 61 62 63", ErrTruncated},
+		{"version 2", "02 00 00 06 5b 4f 7b ed f4 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51", ErrUnsupportedVersion},
+		{"payload flag without length", "01 02 00 06 5b 4f 7b ed f4 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51", ErrTruncated},
+		{"payload length overruns", "01 02 00 06 5b 4f 7b ed f4 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51 00 10 61 62 63", ErrTruncated},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -160,7 +160,7 @@ func TestEncodeCaptureWithPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Encode: %v", err)
 	}
-	want := unhex(t, "01 03 00 06 5b 3b 5e 16 94 00 00 00 00 07 9f 3c 1a 77 e2 b0 4d 51 00 05 68 65 6c 6c 6f")
+	want := unhex(t, "01 03 00 06 5b 4f 7b ed f4 00 00 00 00 07 9f 3c 1a 77 e2 b0 4d 51 00 05 68 65 6c 6c 6f")
 	if !bytes.Equal(got, want) {
 		t.Fatalf("got %x\nwant %x", got, want)
 	}

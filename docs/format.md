@@ -55,28 +55,28 @@ Optional and separate: a writer may add the MISB precision time stamp as its own
 
 ## Worked example
 
-A marker with version 1, flags 0 (time of sending, no payload), origin time 2026-09-11T21:00:00Z, sequence 0 and stream id `9f3c1a77e2b04d51`.
+A marker with version 1, flags 0 (time of sending, no payload), origin time 2026-09-12T21:00:00Z, sequence 0 and stream id `9f3c1a77e2b04d51`.
 
-Origin time: 1789160400000000 microseconds, `00 06 5b 3b 5e 16 94 00`.
+Origin time: 1789246800000000 microseconds, `00 06 5b 4f 7b ed f4 00`.
 
 Body, 22 bytes:
 
 ```
-01 00 00 06 5b 3b 5e 16 94 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51
+01 00 00 06 5b 4f 7b ed f4 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51
 ```
 
 SEI RBSP before emulation prevention, 41 bytes: type 5, size 38 (`0x26`), UUID, body, trailing bits:
 
 ```
 05 26 44 a7 3c b9 b3 6c 45 9a 8f 1a a3 aa 43 1f 62 4a
-01 00 00 06 5b 3b 5e 16 94 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51 80
+01 00 00 06 5b 4f 7b ed f4 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51 80
 ```
 
 The zero run across the end of the time and the sequence needs two emulation-prevention bytes. NAL unit as written, 44 bytes:
 
 ```
 06 05 26 44 a7 3c b9 b3 6c 45 9a 8f 1a a3 aa 43 1f 62 4a
-01 00 00 06 5b 3b 5e 16 94 00 00 03 00 00 03 00 9f 3c 1a 77 e2 b0 4d 51 80
+01 00 00 06 5b 4f 7b ed f4 00 00 03 00 00 03 00 9f 3c 1a 77 e2 b0 4d 51 80
 ```
 
 This example is the first entry in `vectors/`.

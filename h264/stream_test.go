@@ -145,7 +145,7 @@ func TestAccessUnitsStopsWhenConsumerStops(t *testing.T) {
 func markerNALFor(t *testing.T, seq uint32) []byte {
 	t.Helper()
 	body, err := marker.Marker{
-		OriginTime: time.Date(2026, 9, 11, 21, 0, 0, 0, time.UTC),
+		OriginTime: time.Date(2026, 9, 12, 21, 0, 0, 0, time.UTC),
 		Sequence:   seq,
 		StreamID:   [8]byte{0x9f, 0x3c, 0x1a, 0x77, 0xe2, 0xb0, 0x4d, 0x51},
 	}.Encode()

@@ -13,8 +13,8 @@ import (
 
 // The worked example from docs/format.md.
 const (
-	exampleBodyHex = "01 00 00 06 5b 3b 5e 16 94 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51"
-	exampleNALHex  = "06 05 26 44 a7 3c b9 b3 6c 45 9a 8f 1a a3 aa 43 1f 62 4a 01 00 00 06 5b 3b 5e 16 94 00 00 03 00 00 03 00 9f 3c 1a 77 e2 b0 4d 51 80"
+	exampleBodyHex = "01 00 00 06 5b 4f 7b ed f4 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51"
+	exampleNALHex  = "06 05 26 44 a7 3c b9 b3 6c 45 9a 8f 1a a3 aa 43 1f 62 4a 01 00 00 06 5b 4f 7b ed f4 00 00 03 00 00 03 00 9f 3c 1a 77 e2 b0 4d 51 80"
 )
 
 func unhex(t *testing.T, s string) []byte {
@@ -131,7 +131,7 @@ func TestMarkersSkipsForeignSEI(t *testing.T) {
 
 func TestMarkersTwoInOneAccessUnitKeepOrder(t *testing.T) {
 	t.Parallel()
-	second := marker.Marker{OriginTime: time.Unix(1789160400, 0), Sequence: 9, StreamID: [8]byte{1, 2, 3, 4, 5, 6, 7, 8}}
+	second := marker.Marker{OriginTime: time.Unix(1789246800, 0), Sequence: 9, StreamID: [8]byte{1, 2, 3, 4, 5, 6, 7, 8}}
 	body, err := second.Encode()
 	if err != nil {
 		t.Fatal(err)
