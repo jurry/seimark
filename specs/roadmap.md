@@ -10,7 +10,7 @@ Phases are shippable on their own. Exactly one phase is marked Now. The roadmap 
 - `docs/format.md` with the marker layout, semantics and a worked example.
 - ADRs 0001 to 0004.
 
-## Phase 1 — Go reader and `dump`. Now
+## Phase 1 — Go reader and `dump`. Done
 
 - `marker` package: decode the marker body, validate version and flags.
 - `h264` package: walk access units in Annex B and length-prefixed form, find SEI NAL units, extract `user_data_unregistered` payloads through mp4ff.
@@ -20,7 +20,7 @@ Phases are shippable on their own. Exactly one phase is marked Now. The roadmap 
 
 Design in `docs/design/go-library.md` before implementation.
 
-## Phase 2 — Go writer and `inject`. Next
+## Phase 2 — Go writer and `inject`. Now
 
 - Stateful writer: stream identity, sequence counter, time source, placement before the first VCL NAL unit with append as an option, keyframes-only mode, soft cap on the application payload.
 - CLI `seimark inject` for Annex B streams: stamp every access unit from a start time and interval, or from container timestamps.

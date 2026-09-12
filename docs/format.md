@@ -47,34 +47,36 @@ Big-endian throughout. Fixed part 22 bytes.
 
 Writers insert the marker after any access-unit delimiter, parameter sets and existing SEI NAL units, and before the first VCL NAL unit (types 1 to 5) of the access unit. Appending after the last VCL NAL unit is a documented option for pipelines measured to need it. Readers accept either.
 
+A reader splitting an Annex B byte stream into access units follows the usual rule that an SEI NAL unit after a VCL NAL unit starts the next access unit, with one exception: a marker SEI is attached to the access unit it follows when that unit does not carry a marker yet. This is what makes append placement readable. It gives one append-placed marker per access unit; a second one is read as belonging to the next access unit. Prepend placement has no such limit.
+
 ## Compatibility with MISB ST 0604
 
 Optional and separate: a writer may add the MISB precision time stamp as its own `user_data_unregistered` message with the MISB UUID, carrying the same origin time. Tools that know MISB then read the time; tools that know seimark read everything. The two messages never share a UUID or a body.
 
 ## Worked example
 
-A marker with version 1, flags 0 (time of sending, no payload), origin time 2026-09-11T21:00:00Z, sequence 0 and stream id `9f3c1a77e2b04d51`.
+A marker with version 1, flags 0 (time of sending, no payload), origin time 2026-09-12T21:00:00Z, sequence 0 and stream id `9f3c1a77e2b04d51`.
 
-Origin time: 1789160400000000 microseconds, `00 06 5b 3b 5e 16 94 00`.
+Origin time: 1789246800000000 microseconds, `00 06 5b 4f 7b ed f4 00`.
 
 Body, 22 bytes:
 
 ```
-01 00 00 06 5b 3b 5e 16 94 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51
+01 00 00 06 5b 4f 7b ed f4 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51
 ```
 
 SEI RBSP before emulation prevention, 41 bytes: type 5, size 38 (`0x26`), UUID, body, trailing bits:
 
 ```
 05 26 44 a7 3c b9 b3 6c 45 9a 8f 1a a3 aa 43 1f 62 4a
-01 00 00 06 5b 3b 5e 16 94 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51 80
+01 00 00 06 5b 4f 7b ed f4 00 00 00 00 00 9f 3c 1a 77 e2 b0 4d 51 80
 ```
 
 The zero run across the end of the time and the sequence needs two emulation-prevention bytes. NAL unit as written, 44 bytes:
 
 ```
 06 05 26 44 a7 3c b9 b3 6c 45 9a 8f 1a a3 aa 43 1f 62 4a
-01 00 00 06 5b 3b 5e 16 94 00 00 03 00 00 03 00 9f 3c 1a 77 e2 b0 4d 51 80
+01 00 00 06 5b 4f 7b ed f4 00 00 03 00 00 03 00 9f 3c 1a 77 e2 b0 4d 51 80
 ```
 
 This example is the first entry in `vectors/`.
