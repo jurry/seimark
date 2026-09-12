@@ -203,3 +203,57 @@ func TestVideoSamplesFragmentWithoutMdat(t *testing.T) {
 		t.Fatalf("err = %v, want ErrMalformedFile", gotErr)
 	}
 }
+
+// clearDependsOnInMoof rewrites the sample flags inside every moof box, setting
+// sample_depends_on to 0 and leaving the non-sync bit alone. Boxes outside moof
+// (the mfra index in particular) keep their bytes.
+func clearDependsOnInMoof(t *testing.T, data []byte, from, to uint32) int {
+	t.Helper()
+	var pattern, replacement [4]byte
+	binary.BigEndian.PutUint32(pattern[:], from)
+	binary.BigEndian.PutUint32(replacement[:], to)
+	count := 0
+	for pos := 0; pos+8 <= len(data); {
+		size := int(binary.BigEndian.Uint32(data[pos : pos+4]))
+		if size < 8 || pos+size > len(data) {
+			break
+		}
+		if string(data[pos+4:pos+8]) == "moof" {
+			box := data[pos+8 : pos+size]
+			for i := 0; i+4 <= len(box); i++ {
+				if bytes.Equal(box[i:i+4], pattern[:]) {
+					copy(box[i:i+4], replacement[:])
+					count++
+				}
+			}
+		}
+		pos += size
+	}
+	return count
+}
+
+func TestVideoSamplesFragmentedSyncFromNonSyncFlagOnly(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile(filepath.Join("..", "vectors", "streams", "testsrc-marked-frag.mp4"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The fixture marks sync samples depends_on=2, non-sync clear (0x02000000).
+	// Set depends_on to 0 and keep the flags otherwise: still a sync sample
+	// under 14496-12, but not under a depends_on==2 test.
+	if n := clearDependsOnInMoof(t, data, 0x02000000, 0x00000000); n == 0 {
+		t.Fatal("no sync sample flags found in the fixture")
+	}
+	var syncs int
+	for s, err := range VideoSamples(bytes.NewReader(data)) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.Sync {
+			syncs++
+		}
+	}
+	if syncs != 2 {
+		t.Fatalf("got %d sync samples, want 2", syncs)
+	}
+}

@@ -289,7 +289,7 @@ func fragmentedSamples(
 				fs := &samples[i]
 				s := Sample{
 					Index: index, DTS: fs.DecodeTime, PTS: fs.PresentationTime() + editOffset,
-					Timescale: timescale, Sync: fs.IsSync(), Data: fs.Data,
+					Timescale: timescale, Sync: !mp4.DecodeSampleFlags(fs.Flags).SampleIsNonSync, Data: fs.Data,
 				}
 				if !yield(s, nil) {
 					return
