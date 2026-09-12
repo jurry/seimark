@@ -87,7 +87,6 @@ func run(inPath, outPath string) error {
 	return nil
 }
 
-// markUnit writes access unit index of the stream, stamped at its frame time.
 func markUnit(out io.Writer, w *h264.Writer, au []byte, base time.Time, index int) error {
 	// The ffmpeg base stream carries no markers; stripping keeps the generator
 	// right if it is ever run on a stamped stream.

@@ -31,10 +31,7 @@ func UserDataSEINAL(uuid [marker.UUIDSize]byte, body []byte) ([]byte, error) {
 // and a caller that only wants those can ignore an error that is this one.
 var ErrUnparsableSEI = errors.New("seimark: SEI NAL unit does not parse")
 
-// SEIMessage is one message of one SEI NAL unit, classified far enough for a
-// caller to report it: the payload type, the unregistered UUID when there is
-// one, and the decoded seimark marker when the UUID is seimark's and the body
-// decodes.
+// SEIMessage is one message of one SEI NAL unit.
 type SEIMessage struct {
 	Type    uint
 	UUID    [marker.UUIDSize]byte
@@ -71,7 +68,6 @@ func SEIMessages(nal []byte) ([]SEIMessage, error) {
 	return out, nil
 }
 
-// classifySEIMessage fills in the UUID and the marker of one message.
 func classifySEIMessage(msg *sei.SEIData) (SEIMessage, error) {
 	payload := msg.Payload()
 	out := SEIMessage{Type: msg.Type(), Payload: payload}

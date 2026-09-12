@@ -116,7 +116,6 @@ func (w *Writer) Mark(au []byte, f Format, at time.Time, payload []byte) (out []
 	return out, true, nil
 }
 
-// markerNAL encodes the marker for this access unit into a complete SEI NAL unit.
 func (w *Writer) markerNAL(at time.Time, payload []byte) ([]byte, error) {
 	body, err := marker.Marker{
 		TimeSource: w.opts.TimeSource,
@@ -133,8 +132,7 @@ func (w *Writer) markerNAL(at time.Time, payload []byte) ([]byte, error) {
 }
 
 // insertIndex is where the marker NAL unit goes among nalus: after any
-// delimiter, parameter sets and existing SEI, before the first VCL NAL unit. An
-// empty NAL unit has no header to read and is skipped, as the reader skips it.
+// delimiter, parameter sets and existing SEI, before the first VCL NAL unit.
 func insertIndex(nalus [][]byte) (int, error) {
 	for i, nal := range nalus {
 		if len(nal) > 0 && avc.IsVideoNaluType(avc.GetNaluType(nal[0])) {
@@ -160,14 +158,13 @@ func dropEmpty(nalus [][]byte) [][]byte {
 }
 
 // isMarkerSEI reports whether nal is an SEI NAL unit carrying a seimark marker.
-// An empty NAL unit has no header to read and is not one.
 func isMarkerSEI(nal []byte) bool {
 	return len(nal) > 0 && avc.GetNaluType(nal[0]) == avc.NALU_SEI && carriesMarker(nal)
 }
 
 // StripMarkers returns the access unit without the SEI NAL units that carry a
 // seimark marker, rebuilt in the framing f names. Empty NAL units are dropped
-// along with them, as the reader skips them anyway. It never aliases au.
+// along with them. It never aliases au.
 func StripMarkers(au []byte, f Format) ([]byte, error) {
 	nalus, err := NALUnits(au, f)
 	if err != nil {
@@ -187,8 +184,7 @@ func StripMarkers(au []byte, f Format) ([]byte, error) {
 	return joinNALUnits(kept, f)
 }
 
-// hasIDR reports whether any NAL unit is an IDR picture. An empty NAL unit has
-// no header to read and is skipped.
+// hasIDR reports whether any NAL unit is an IDR picture.
 func hasIDR(nalus [][]byte) bool {
 	for _, nal := range nalus {
 		if len(nal) > 0 && avc.GetNaluType(nal[0]) == avc.NALU_IDR {

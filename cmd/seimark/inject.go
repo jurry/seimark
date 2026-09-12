@@ -27,7 +27,6 @@ const streamIDHexLength = 2 * marker.StreamIDSize
 // counts the two fields of a frame.
 const fieldsPerFrameRate = 2
 
-// injectFlags holds runInject's parsed and validated flags.
 type injectFlags struct {
 	start   time.Time
 	fps     float64
@@ -101,8 +100,7 @@ func fpsGiven(fs *flag.FlagSet) bool {
 	return given
 }
 
-// usableRate rejects the frame rates that make the time of unit i meaningless:
-// not a number, infinite, or not above zero.
+// usableRate rejects the rates that make the time of unit i meaningless.
 func usableRate(rate float64) bool {
 	return !math.IsNaN(rate) && !math.IsInf(rate, 0) && rate > 0
 }
@@ -316,7 +314,6 @@ func markOne(w *h264.Writer, au []byte, at time.Time, index int, stderr io.Write
 	return out, marked, true
 }
 
-// writeMarked stamps every access unit of in into the output file.
 func writeMarked(in io.Reader, flags *injectFlags, rate float64, stderr io.Writer) int {
 	w, err := h264.NewWriter(flags.opts)
 	if err != nil {

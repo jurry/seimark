@@ -142,7 +142,6 @@ func nalsMP4(r io.ReadSeeker, w io.Writer) error {
 	return nil
 }
 
-// printNALUnits writes one indented line per NAL unit of the access unit.
 func printNALUnits(w io.Writer, au []byte, f h264.Format) error {
 	nalus, err := h264.NALUnits(au, f)
 	if err != nil {
@@ -164,7 +163,6 @@ func printNALUnits(w io.Writer, au []byte, f h264.Format) error {
 	return nil
 }
 
-// seiSummary describes the messages of one SEI NAL unit, or says it does not parse.
 func seiSummary(nal []byte) string {
 	msgs, err := h264.SEIMessages(nal)
 	if errors.Is(err, h264.ErrUnparsableSEI) {
