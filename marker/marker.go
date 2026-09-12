@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 )
 
@@ -68,12 +67,8 @@ func Decode(body []byte) (Marker, error) {
 		return Marker{}, fmt.Errorf("%w: %d", ErrUnsupportedVersion, body[0])
 	}
 	flags := body[1]
-	originUS := binary.BigEndian.Uint64(body[2:10])
-	if originUS > math.MaxInt64 {
-		return Marker{}, fmt.Errorf("seimark: origin time %d overflows int64 microseconds", originUS)
-	}
 	m := Marker{
-		OriginTime: time.UnixMicro(int64(originUS)).UTC(),
+		OriginTime: time.UnixMicro(readInt64(body[2:10])).UTC(),
 		Sequence:   binary.BigEndian.Uint32(body[10:14]),
 	}
 	if flags&flagTimeCapture != 0 {
@@ -91,6 +86,13 @@ func Decode(body []byte) (Marker, error) {
 		m.Payload = append([]byte{}, body[24:24+n]...)
 	}
 	return m, nil
+}
+
+// readInt64 reads eight big-endian bytes; docs/format.md defines the origin
+// time as a signed 64-bit value, so the two's-complement reinterpretation is
+// the specified conversion and cannot overflow.
+func readInt64(b []byte) int64 {
+	return int64(binary.BigEndian.Uint64(b))
 }
 
 // IsFormatUUID reports whether uuid is the seimark format UUID.

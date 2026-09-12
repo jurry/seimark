@@ -63,6 +63,14 @@ linters:
       - common-false-positives
       - std-error-handling
     rules:
+      # docs/format.md defines the origin time as signed 64-bit; readInt64 is
+      # the two's-complement read the format specifies, so there is nothing to
+      # check and G115 has nothing to warn about.
+      - path: marker/marker.go
+        text: "G115"
+        source: "return int64\\(binary\\.BigEndian\\.Uint64\\(b\\)\\)"
+        linters:
+          - gosec
       - path: _test\.go
         linters:
           - dupl

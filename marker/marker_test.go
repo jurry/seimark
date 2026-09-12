@@ -208,3 +208,40 @@ func TestRoundTripRoundsToMicroseconds(t *testing.T) {
 		t.Fatalf("OriginTime = %v, want %v", got.OriginTime, want)
 	}
 }
+
+func TestDecodeZeroMarkerRoundTrips(t *testing.T) {
+	t.Parallel()
+	body, err := Marker{}.Encode()
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	got, err := Decode(body)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if !got.OriginTime.Equal(Marker{}.OriginTime) {
+		t.Errorf("OriginTime = %v, want %v", got.OriginTime, Marker{}.OriginTime)
+	}
+	if got.Sequence != 0 || got.StreamID != ([8]byte{}) || got.Payload != nil {
+		t.Errorf("got %+v, want the zero marker", got)
+	}
+}
+
+func TestDecodeNegativeOriginTime(t *testing.T) {
+	t.Parallel()
+	want := Marker{OriginTime: time.Date(1969, 12, 31, 23, 59, 59, 0, time.UTC)}
+	body, err := want.Encode()
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	got, err := Decode(body)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if !got.OriginTime.Equal(want.OriginTime) {
+		t.Fatalf("OriginTime = %v, want %v", got.OriginTime, want.OriginTime)
+	}
+	if got.OriginTime.UnixMicro() != -1000000 {
+		t.Fatalf("origin_us = %d, want -1000000", got.OriginTime.UnixMicro())
+	}
+}
