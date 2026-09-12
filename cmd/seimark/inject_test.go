@@ -227,6 +227,35 @@ func TestInjectMarkedCount(t *testing.T) {
 	}
 }
 
+func TestInjectRefusesOutputEqualToInput(t *testing.T) {
+	t.Parallel()
+
+	in := strippedFixture(t)
+
+	before, err := os.ReadFile(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"inject", "-fps", "10", in, in}, &stdout, &stderr); code != 2 {
+		t.Fatalf("exit %d, want 2; stderr: %s", code, stderr.String())
+	}
+
+	if !strings.Contains(stderr.String(), "output must not be the input") {
+		t.Fatalf("stderr: %s", stderr.String())
+	}
+
+	after, err := os.ReadFile(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(before, after) {
+		t.Fatal("the input file changed")
+	}
+}
+
 func TestInjectRefusesMarkedInput(t *testing.T) {
 	t.Parallel()
 

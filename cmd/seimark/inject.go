@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Eyevinn/mp4ff/avc"
@@ -137,6 +138,16 @@ func runInject(args []string, _, stderr io.Writer) int {
 
 	defer func() { _ = in.Close() }()
 
+	if same, err := sameFile(in, flags.outPath); err != nil {
+		fmt.Fprintf(stderr, "seimark inject: %v\n", err)
+
+		return exitError
+	} else if same {
+		fmt.Fprintf(stderr, "seimark inject: output must not be the input: %s\n", flags.outPath)
+
+		return exitUsage
+	}
+
 	format, err := sniff(in)
 	switch {
 	case errors.Is(err, errUnknownInput):
@@ -163,6 +174,31 @@ func runInject(args []string, _, stderr io.Writer) int {
 	}
 
 	return writeMarked(in, &flags, rate, stderr)
+}
+
+// sameFile reports whether outPath names the file already open as in, which
+// inject would otherwise truncate while reading it. An OUT that does not exist
+// yet can still collide by path, so both tests are made.
+func sameFile(in *os.File, outPath string) (bool, error) {
+	inInfo, err := in.Stat()
+	if err != nil {
+		return false, fmt.Errorf("stat input: %w", err)
+	}
+
+	if filepath.Clean(in.Name()) == filepath.Clean(outPath) {
+		return true, nil
+	}
+
+	outInfo, err := os.Stat(outPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, fmt.Errorf("stat output: %w", err)
+	}
+
+	return os.SameFile(inInfo, outInfo), nil
 }
 
 // errNoRate is the stream that names no frame rate of its own.
