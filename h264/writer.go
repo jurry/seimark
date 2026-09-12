@@ -156,6 +156,27 @@ func (w *Writer) insertIndex(nalus [][]byte) (int, error) {
 	return 0, ErrNoVCL
 }
 
+// StripMarkers returns the access unit without the SEI NAL units that carry a
+// seimark marker, rebuilt in the framing f names. It never aliases au.
+func StripMarkers(au []byte, f Format) ([]byte, error) {
+	nalus, err := NALUnits(au, f)
+	if err != nil {
+		return nil, err
+	}
+
+	kept := make([][]byte, 0, len(nalus))
+
+	for _, nal := range nalus {
+		if avc.GetNaluType(nal[0]) == avc.NALU_SEI && carriesMarker(nal) {
+			continue
+		}
+
+		kept = append(kept, nal)
+	}
+
+	return joinNALUnits(kept, f)
+}
+
 func hasIDR(nalus [][]byte) bool {
 	for _, nal := range nalus {
 		if avc.GetNaluType(nal[0]) == avc.NALU_IDR {

@@ -308,3 +308,72 @@ func equalInts(a, b []int) bool {
 
 	return true
 }
+
+func TestStripMarkersRemovesOnlyMarkerSEI(t *testing.T) {
+	t.Parallel()
+
+	in := annexB(foreignSEINAL(t), exampleMarkerNAL(t), idr)
+
+	out, err := StripMarkers(in, FormatAnnexB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := naluTypes(t, out, FormatAnnexB), []int{6, 5}; !equalInts(got, want) {
+		t.Fatalf("NAL types %v, want %v", got, want)
+	}
+
+	ms, err := Markers(out, FormatAnnexB)
+	if err != nil || len(ms) != 0 {
+		t.Fatalf("markers left: %v %v", ms, err)
+	}
+}
+
+func TestStripMarkersIsANoopWithoutMarkers(t *testing.T) {
+	t.Parallel()
+
+	in := annexB(sps, pps, idr)
+
+	out, err := StripMarkers(in, FormatAnnexB)
+	if err != nil || !bytes.Equal(out, in) {
+		t.Fatalf("changed an unmarked unit: %v", err)
+	}
+}
+
+func TestStripMarkersLengthPrefixed(t *testing.T) {
+	t.Parallel()
+
+	in := lengthPrefixed(exampleMarkerNAL(t), idr)
+
+	out, err := StripMarkers(in, FormatLengthPrefixed)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := naluTypes(t, out, FormatLengthPrefixed), []int{5}; !equalInts(got, want) {
+		t.Fatalf("NAL types %v, want %v", got, want)
+	}
+}
+
+func TestStripThenMarkRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	w := newTestWriter(t, WriterOptions{})
+
+	marked, _, err := w.Mark(annexB(sps, pps, idr), FormatAnnexB, t0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stripped, err := StripMarkers(marked, FormatAnnexB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w2 := newTestWriter(t, WriterOptions{})
+
+	again, _, err := w2.Mark(stripped, FormatAnnexB, t0, nil)
+	if err != nil || !bytes.Equal(again, marked) {
+		t.Fatalf("round trip differs: %v", err)
+	}
+}
