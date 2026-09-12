@@ -38,8 +38,12 @@ func (f Format) String() string {
 // ErrUnknownFormat is returned when an access unit is in neither recognised framing.
 var ErrUnknownFormat = errors.New("seimark: cannot tell Annex B from length-prefixed data")
 
-// minLengthPrefixedSize is a four-byte length prefix plus at least one NAL unit byte.
-const minLengthPrefixedSize = 5
+// lengthPrefixSize is the width of the length prefix before each NAL unit in
+// length-prefixed framing.
+const lengthPrefixSize = 4
+
+// minLengthPrefixedSize is a length prefix plus at least one NAL unit byte.
+const minLengthPrefixedSize = lengthPrefixSize + 1
 
 // DetectFormat guesses from the first bytes. A start code means Annex B; a
 // plausible four-byte length means length-prefixed.
@@ -49,8 +53,8 @@ func DetectFormat(au []byte) Format {
 	}
 
 	if len(au) >= minLengthPrefixedSize {
-		n := binary.BigEndian.Uint32(au[:4])
-		if n >= 1 && int(n) <= len(au)-4 {
+		n := binary.BigEndian.Uint32(au[:lengthPrefixSize])
+		if n >= 1 && int(n) <= len(au)-lengthPrefixSize {
 			return FormatLengthPrefixed
 		}
 	}
@@ -58,9 +62,16 @@ func DetectFormat(au []byte) Format {
 	return FormatUnknown
 }
 
+// shortStartCodeSize and startCodeSize are the two Annex B start code widths:
+// 00 00 01 and 00 00 00 01.
+const (
+	shortStartCodeSize = 3
+	startCodeSize      = 4
+)
+
 func hasStartCode(b []byte) bool {
-	return (len(b) >= 3 && b[0] == 0 && b[1] == 0 && b[2] == 1) ||
-		(len(b) >= 4 && b[0] == 0 && b[1] == 0 && b[2] == 0 && b[3] == 1)
+	return (len(b) >= shortStartCodeSize && b[0] == 0 && b[1] == 0 && b[2] == 1) ||
+		(len(b) >= startCodeSize && b[0] == 0 && b[1] == 0 && b[2] == 0 && b[3] == 1)
 }
 
 // NALUnits splits an access unit into NAL units without start codes or length
@@ -84,17 +95,17 @@ func lengthPrefixedNALUnits(au []byte) ([][]byte, error) {
 	var nalus [][]byte
 
 	for pos := 0; pos < len(au); {
-		if len(au)-pos < 4 {
+		if len(au)-pos < lengthPrefixSize {
 			return nil, fmt.Errorf("seimark: length-prefixed access unit: %d bytes left at offset %d, need a 4-byte length",
 				len(au)-pos, pos)
 		}
 
-		length := int(binary.BigEndian.Uint32(au[pos : pos+4]))
+		length := int(binary.BigEndian.Uint32(au[pos : pos+lengthPrefixSize]))
 
-		pos += 4
+		pos += lengthPrefixSize
 		if length < 1 || length > len(au)-pos {
 			return nil, fmt.Errorf("seimark: length-prefixed access unit: NAL unit length %d at offset %d, %d bytes left",
-				length, pos-4, len(au)-pos)
+				length, pos-lengthPrefixSize, len(au)-pos)
 		}
 
 		nalus = append(nalus, au[pos:pos+length])

@@ -13,7 +13,7 @@ import (
 
 // UserDataSEINAL builds a complete SEI NAL unit, header byte and emulation
 // prevention included, carrying one user_data_unregistered message.
-func UserDataSEINAL(uuid [16]byte, body []byte) ([]byte, error) {
+func UserDataSEINAL(uuid [marker.UUIDSize]byte, body []byte) ([]byte, error) {
 	payload := make([]byte, 0, len(uuid)+len(body))
 	payload = append(payload, uuid[:]...)
 	payload = append(payload, body...)
@@ -63,11 +63,11 @@ func Markers(au []byte, f Format) ([]marker.Marker, error) {
 
 		for _, msg := range msgs {
 			payload := msg.Payload()
-			if msg.Type() != sei.SEIUserDataUnregisteredType || len(payload) < 16 || !marker.IsFormatUUID(payload[:16]) {
+			if msg.Type() != sei.SEIUserDataUnregisteredType || len(payload) < marker.UUIDSize || !marker.IsFormatUUID(payload[:marker.UUIDSize]) {
 				continue
 			}
 
-			m, err := marker.Decode(payload[16:])
+			m, err := marker.Decode(payload[marker.UUIDSize:])
 			if err != nil {
 				return found, fmt.Errorf("seimark: marker in SEI NAL unit: %w", err)
 			}

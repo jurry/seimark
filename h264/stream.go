@@ -20,6 +20,12 @@ func startCode() []byte {
 	return []byte{0, 0, 1}
 }
 
+// fourByteStartCode is what AccessUnits and carriesMarker prepend to each NAL
+// unit; startCodeSize names its length.
+func fourByteStartCode() []byte {
+	return []byte{0, 0, 0, 1}
+}
+
 // AccessUnits splits an Annex B byte stream into access units. Each yielded
 // unit uses four-byte start codes. A new unit begins, once the current one holds
 // a VCL NAL unit, at a delimiter, SPS, PPS or SEI, or at a VCL NAL unit whose
@@ -73,7 +79,7 @@ func (a *accessUnit) add(nal []byte) []byte {
 		*a = accessUnit{}
 	}
 
-	a.bytes = append(a.bytes, 0, 0, 0, 1)
+	a.bytes = append(a.bytes, fourByteStartCode()...)
 	a.bytes = append(a.bytes, nal...)
 	a.sawVCL = a.sawVCL || avc.IsVideoNaluType(t)
 	a.hasMarker = a.hasMarker || isMarker
@@ -95,13 +101,20 @@ func breaksAccessUnit(nal []byte, t avc.NaluType, isMarker, hasMarker bool) bool
 
 // carriesMarker reports whether this one SEI NAL unit holds a seimark marker.
 func carriesMarker(nal []byte) bool {
-	one := make([]byte, 0, 4+len(nal))
-	one = append(one, 0, 0, 0, 1)
+	one := make([]byte, 0, startCodeSize+len(nal))
+	one = append(one, fourByteStartCode()...)
 	one = append(one, nal...)
 	ms, _ := Markers(one, FormatAnnexB)
 
 	return len(ms) > 0
 }
+
+// naluHeaderSize is the one-byte NAL unit header; the slice header byte follows it.
+const naluHeaderSize = 1
+
+// firstBitMask isolates the top bit of the first slice header byte, where
+// first_mb_in_slice's ue(v) encoding puts its leading 1 bit when the value is zero.
+const firstBitMask = 0x80
 
 func startsAccessUnit(nal []byte, t avc.NaluType) bool {
 	switch t {
@@ -110,7 +123,7 @@ func startsAccessUnit(nal []byte, t avc.NaluType) bool {
 	case avc.NALU_IDR, avc.NALU_NON_IDR:
 		// first_mb_in_slice is the first ue(v) after the header; it is zero
 		// exactly when the first bit is 1.
-		return len(nal) > 1 && nal[1]&0x80 != 0
+		return len(nal) > naluHeaderSize && nal[naluHeaderSize]&firstBitMask != 0
 	case avc.NALU_EO_SEQ, avc.NALU_EO_STREAM, avc.NALU_FILL:
 		return false
 	}

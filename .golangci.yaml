@@ -45,16 +45,6 @@ linters:
       min-occurrences: 3
     lll:
       line-length: 140
-    # mnd: byte widths and tiny counts read better inline; everything else
-    # gets a name from the specification.
-    mnd:
-      ignored-numbers:
-        - "0"
-        - "1"
-        - "2"
-        - "4"
-        - "8"
-        - "16"
     nakedret:
       max-func-lines: 1
     revive:

@@ -75,31 +75,31 @@ func parseDumpFlags(args []string, stderr io.Writer) (flags dumpFlags, exitCode 
 	all := fs.Bool("all", false, "also print access units without a marker")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
-			return dumpFlags{}, 0, false
+			return dumpFlags{}, exitOK, false
 		}
 
-		return dumpFlags{}, 2, false
+		return dumpFlags{}, exitUsage, false
 	}
 
 	if fs.NArg() != 1 {
 		fmt.Fprintln(stderr, "seimark dump: exactly one FILE is required")
 
-		return dumpFlags{}, 2, false
+		return dumpFlags{}, exitUsage, false
 	}
 
 	if *out != outJSONL && *out != outCSV {
 		fmt.Fprintf(stderr, "seimark dump: -out must be jsonl or csv, got %q\n", *out)
 
-		return dumpFlags{}, 2, false
+		return dumpFlags{}, exitUsage, false
 	}
 
 	if *format != formatAuto && *format != formatAnnexB && *format != formatMP4 {
 		fmt.Fprintf(stderr, "seimark dump: -format must be auto, annexb or mp4, got %q\n", *format)
 
-		return dumpFlags{}, 2, false
+		return dumpFlags{}, exitUsage, false
 	}
 
-	return dumpFlags{format: *format, out: *out, all: *all, path: fs.Arg(0)}, 0, true
+	return dumpFlags{format: *format, out: *out, all: *all, path: fs.Arg(0)}, exitOK, true
 }
 
 func runDump(args []string, stdout, stderr io.Writer) int {
@@ -112,7 +112,7 @@ func runDump(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "seimark dump: %v\n", err)
 
-		return 1
+		return exitError
 	}
 
 	defer func() { _ = f.Close() }()
@@ -124,11 +124,11 @@ func runDump(args []string, stdout, stderr io.Writer) int {
 		case errors.Is(err, errUnknownInput):
 			fmt.Fprintf(stderr, "seimark dump: %v; pass -format\n", err)
 
-			return 2
+			return exitUsage
 		case err != nil:
 			fmt.Fprintf(stderr, "seimark dump: %v\n", err)
 
-			return 1
+			return exitError
 		}
 	}
 
@@ -149,22 +149,32 @@ func runDump(args []string, stdout, stderr io.Writer) int {
 	if err := w.flush(); err != nil {
 		fmt.Fprintf(stderr, "seimark dump: write: %v\n", err)
 
-		return 1
+		return exitError
 	}
 
 	if walkErr != nil {
 		fmt.Fprintf(stderr, "seimark dump: %v\n", walkErr)
 
-		return 1
+		return exitError
 	}
 
-	return 0
+	return exitOK
 }
+
+// boxSizeFieldSize is the width of an ISO BMFF box's leading size field, where its type field begins.
+const boxSizeFieldSize = 4
+
+// boxHeaderSize is a box's size field plus its four-byte type field.
+const boxHeaderSize = boxSizeFieldSize + 4
+
+// sniffHeadSize is the read-ahead used to tell mp4 from Annex B: enough for a
+// box header and for h264.DetectFormat's own look at the first bytes.
+const sniffHeadSize = 12
 
 // sniff decides between mp4 and annexb from the first bytes and rewinds. A
 // short file is not an error; anything else the read reports is.
 func sniff(f io.ReadSeeker) (string, error) {
-	var head [12]byte
+	var head [sniffHeadSize]byte
 
 	n, err := io.ReadFull(f, head[:])
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
@@ -175,8 +185,8 @@ func sniff(f io.ReadSeeker) (string, error) {
 		return "", fmt.Errorf("seimark: rewind input: %w", err)
 	}
 
-	if n >= 8 {
-		switch string(head[4:8]) {
+	if n >= boxHeaderSize {
+		switch string(head[boxSizeFieldSize:boxHeaderSize]) {
 		case "ftyp", "moov", "moof", "styp":
 			return formatMP4, nil
 		}

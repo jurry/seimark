@@ -23,15 +23,21 @@ const argCount = 3
 // expectedAccessUnits is the access-unit count of the fixture in vectors/streams.
 const expectedAccessUnits = 20
 
+// Exit codes.
+const (
+	exitError = 1
+	exitUsage = 2
+)
+
 func main() {
 	if len(os.Args) != argCount {
 		fmt.Fprintln(os.Stderr, "usage: gen IN.h264 OUT.h264")
-		os.Exit(2)
+		os.Exit(exitUsage)
 	}
 
 	if err := run(os.Args[1], os.Args[2]); err != nil {
 		fmt.Fprintln(os.Stderr, "gen:", err)
-		os.Exit(1)
+		os.Exit(exitError)
 	}
 }
 

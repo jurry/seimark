@@ -11,14 +11,36 @@ import (
 // Version is the only marker body version this package encodes and decodes.
 const (
 	Version          = 1
-	FixedSize        = 22
 	PayloadSoftLimit = 4096
 	PayloadHardLimit = 65535
 )
 
+// Body layout from docs/format.md. Each offset follows from the field before it.
+const (
+	offsetVersion       = 0
+	versionSize         = 1
+	offsetFlags         = offsetVersion + versionSize
+	flagsSize           = 1
+	offsetOriginTime    = offsetFlags + flagsSize
+	originTimeSize      = 8
+	offsetSequence      = offsetOriginTime + originTimeSize
+	sequenceSize        = 4
+	offsetStreamID      = offsetSequence + sequenceSize
+	streamIDSize        = 8
+	offsetPayloadLength = offsetStreamID + streamIDSize
+	payloadLengthSize   = 2
+	offsetPayload       = offsetPayloadLength + payloadLengthSize
+)
+
+// FixedSize is the length of the body before the optional payload length and payload.
+const FixedSize = offsetPayloadLength
+
+// UUIDSize is the length of the format UUID.
+const UUIDSize = 16
+
 // FormatUUID identifies a seimark marker inside a user_data_unregistered SEI message.
-func FormatUUID() [16]byte {
-	return [16]byte{0x44, 0xa7, 0x3c, 0xb9, 0xb3, 0x6c, 0x45, 0x9a, 0x8f, 0x1a, 0xa3, 0xaa, 0x43, 0x1f, 0x62, 0x4a}
+func FormatUUID() [UUIDSize]byte {
+	return [UUIDSize]byte{0x44, 0xa7, 0x3c, 0xb9, 0xb3, 0x6c, 0x45, 0x9a, 0x8f, 0x1a, 0xa3, 0xaa, 0x43, 0x1f, 0x62, 0x4a}
 }
 
 // TimeSource says which event OriginTime records.
@@ -48,7 +70,7 @@ type Marker struct {
 	TimeSource TimeSource
 	OriginTime time.Time
 	Sequence   uint32
-	StreamID   [8]byte
+	StreamID   [streamIDSize]byte
 	Payload    []byte
 }
 
@@ -74,29 +96,29 @@ func Decode(body []byte) (Marker, error) {
 		return Marker{}, fmt.Errorf("%w: %d", ErrUnsupportedVersion, body[0])
 	}
 
-	flags := body[1]
+	flags := body[offsetFlags]
 
 	m := Marker{
-		OriginTime: time.UnixMicro(readInt64(body[2:10])).UTC(),
-		Sequence:   binary.BigEndian.Uint32(body[10:14]),
+		OriginTime: time.UnixMicro(readInt64(body[offsetOriginTime : offsetOriginTime+originTimeSize])).UTC(),
+		Sequence:   binary.BigEndian.Uint32(body[offsetSequence : offsetSequence+sequenceSize]),
 	}
 	if flags&flagTimeCapture != 0 {
 		m.TimeSource = TimeCapture
 	}
 
-	copy(m.StreamID[:], body[14:22])
+	copy(m.StreamID[:], body[offsetStreamID:offsetStreamID+streamIDSize])
 
 	if flags&flagPayload != 0 {
-		if len(body) < FixedSize+2 {
+		if len(body) < offsetPayload {
 			return Marker{}, fmt.Errorf("%w: payload flag set but no length", ErrTruncated)
 		}
 
-		n := int(binary.BigEndian.Uint16(body[22:24]))
-		if len(body) < FixedSize+2+n {
-			return Marker{}, fmt.Errorf("%w: payload length %d, %d bytes left", ErrTruncated, n, len(body)-FixedSize-2)
+		n := int(binary.BigEndian.Uint16(body[offsetPayloadLength:offsetPayload]))
+		if len(body) < offsetPayload+n {
+			return Marker{}, fmt.Errorf("%w: payload length %d, %d bytes left", ErrTruncated, n, len(body)-offsetPayload)
 		}
 
-		m.Payload = append([]byte{}, body[24:24+n]...)
+		m.Payload = append([]byte{}, body[offsetPayload:offsetPayload+n]...)
 	}
 
 	return m, nil
@@ -112,7 +134,7 @@ func readInt64(b []byte) int64 {
 
 // IsFormatUUID reports whether uuid is the seimark format UUID.
 func IsFormatUUID(uuid []byte) bool {
-	return len(uuid) == 16 && [16]byte(uuid) == FormatUUID()
+	return len(uuid) == UUIDSize && [UUIDSize]byte(uuid) == FormatUUID()
 }
 
 // Encode returns the marker body. The payload flag is set when Payload is non-nil.
@@ -122,16 +144,16 @@ func (m Marker) Encode() ([]byte, error) {
 		return nil, fmt.Errorf("%w: %d", ErrPayloadTooLarge, len(m.Payload))
 	}
 
-	out := make([]byte, FixedSize, FixedSize+2+len(m.Payload))
+	out := make([]byte, FixedSize, offsetPayload+len(m.Payload))
 
-	out[0] = Version
+	out[offsetVersion] = Version
 	if m.TimeSource == TimeCapture {
-		out[1] |= flagTimeCapture
+		out[offsetFlags] |= flagTimeCapture
 	}
 
-	binary.BigEndian.PutUint64(out[2:10], uint64(m.OriginTime.UnixMicro()))
-	binary.BigEndian.PutUint32(out[10:14], m.Sequence)
-	copy(out[14:22], m.StreamID[:])
+	binary.BigEndian.PutUint64(out[offsetOriginTime:offsetOriginTime+originTimeSize], uint64(m.OriginTime.UnixMicro()))
+	binary.BigEndian.PutUint32(out[offsetSequence:offsetSequence+sequenceSize], m.Sequence)
+	copy(out[offsetStreamID:offsetStreamID+streamIDSize], m.StreamID[:])
 
 	if m.Payload != nil {
 		n := len(m.Payload)
@@ -139,7 +161,7 @@ func (m Marker) Encode() ([]byte, error) {
 			return nil, fmt.Errorf("%w: %d", ErrPayloadTooLarge, n)
 		}
 
-		out[1] |= flagPayload
+		out[offsetFlags] |= flagPayload
 		out = binary.BigEndian.AppendUint16(out, uint16(n))
 		out = append(out, m.Payload...)
 	}

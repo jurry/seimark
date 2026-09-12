@@ -14,6 +14,13 @@ commands:
 
 Exit codes: 0 success, 1 the file could not be read or parsed, 2 usage error.`
 
+// Exit codes returned by run and its subcommands.
+const (
+	exitOK    = 0
+	exitError = 1
+	exitUsage = 2
+)
+
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
@@ -24,7 +31,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
 
-		return 2
+		return exitUsage
 	}
 
 	switch args[0] {
@@ -33,10 +40,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "-h", "--help", "help":
 		fmt.Fprintln(stdout, usage)
 
-		return 0
+		return exitOK
 	}
 
 	fmt.Fprintf(stderr, "seimark: unknown command %q\n%s\n", args[0], usage)
 
-	return 2
+	return exitUsage
 }
