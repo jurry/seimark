@@ -63,18 +63,16 @@ func AccessUnits(r io.Reader) iter.Seq2[[]byte, error] {
 
 // accessUnit accumulates the NAL units of one access unit.
 type accessUnit struct {
-	bytes     []byte
-	sawVCL    bool
-	hasMarker bool
+	bytes  []byte
+	sawVCL bool
 }
 
 // add appends nal, returning the finished access unit when nal starts a new one.
 func (a *accessUnit) add(nal []byte) []byte {
 	t := avc.GetNaluType(nal[0])
-	isMarker := t == avc.NALU_SEI && carriesMarker(nal)
 
 	var done []byte
-	if a.sawVCL && breaksAccessUnit(nal, t, isMarker, a.hasMarker) {
+	if a.sawVCL && startsAccessUnit(nal, t) {
 		done = a.bytes
 		*a = accessUnit{}
 	}
@@ -82,21 +80,8 @@ func (a *accessUnit) add(nal []byte) []byte {
 	a.bytes = append(a.bytes, fourByteStartCode()...)
 	a.bytes = append(a.bytes, nal...)
 	a.sawVCL = a.sawVCL || avc.IsVideoNaluType(t)
-	a.hasMarker = a.hasMarker || isMarker
 
 	return done
-}
-
-// breaksAccessUnit reports whether nal starts a new access unit, given that the
-// current one already holds a VCL NAL unit. An append-placed marker belongs to
-// the picture it follows, so it joins the current unit unless that unit already
-// carries a marker of its own.
-func breaksAccessUnit(nal []byte, t avc.NaluType, isMarker, hasMarker bool) bool {
-	if isMarker && !hasMarker {
-		return false
-	}
-
-	return startsAccessUnit(nal, t)
 }
 
 // carriesMarker reports whether this one SEI NAL unit holds a seimark marker.

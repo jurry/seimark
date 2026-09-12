@@ -3,8 +3,6 @@ package h264
 import (
 	"bytes"
 	"errors"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -187,68 +185,40 @@ func markerNALFor(t *testing.T, seq uint32) []byte {
 	return nal
 }
 
-// appendPlaced rewrites the Annex B fixture so every marker SEI sits after the
-// slice NAL unit of its access unit instead of before it.
-func appendPlaced(t *testing.T) []byte {
-	t.Helper()
-
-	in, err := os.Open(filepath.Join("..", "vectors", "streams", "testsrc-marked.h264"))
-	if err != nil {
-		t.Fatal(err)
+func TestAccessUnitsSEIAfterTheLastVCLStartsTheNextUnit(t *testing.T) {
+	t.Parallel()
+	// The standard rule, with no marker exception: an SEI NAL unit that follows
+	// a picture belongs to the next access unit, marker or not.
+	aus := collect(t, annexB(idr, markerNALFor(t, 0), nonIDR))
+	if len(aus) != 2 {
+		t.Fatalf("got %d access units, want 2", len(aus))
 	}
 
-	defer func() { _ = in.Close() }()
-
-	var out []byte
-
-	units := 0
-
-	for au, err := range AccessUnits(in) {
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		nalus, err := NALUnits(au, FormatAnnexB)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		var (
-			markerNAL []byte
-			rest      [][]byte
-		)
-
-		for _, nal := range nalus {
-			if ms, _ := Markers(annexB(nal), FormatAnnexB); len(ms) > 0 {
-				markerNAL = nal
-				continue
-			}
-
-			rest = append(rest, nal)
-		}
-
-		if markerNAL == nil {
-			t.Fatalf("access unit %d has no marker", units)
-		}
-
-		out = append(out, annexB(append(rest, markerNAL)...)...)
-		units++
+	first, err := Markers(aus[0], FormatAnnexB)
+	if err != nil || len(first) != 0 {
+		t.Fatalf("first unit: markers %v, err %v", first, err)
 	}
 
-	if units != 20 {
-		t.Fatalf("fixture has %d access units, want 20", units)
+	second, err := Markers(aus[1], FormatAnnexB)
+	if err != nil || len(second) != 1 || second[0].Sequence != 0 {
+		t.Fatalf("second unit: markers %v, err %v", second, err)
 	}
-
-	return out
 }
 
-func TestAccessUnitsAppendPlacedMarkerStaysWithItsPicture(t *testing.T) {
+func TestAccessUnitsKeyframesOnlyShape(t *testing.T) {
 	t.Parallel()
+	// [SPS PPS IDR][nonIDR][IDR] with only the IDR units marked, as
+	// -keyframes-only writes it.
+	stream := annexB(sps, pps, markerNALFor(t, 0), idr)
+	stream = append(stream, annexB(nonIDR)...)
+	stream = append(stream, annexB(markerNALFor(t, 1), idr)...)
 
-	aus := collect(t, appendPlaced(t))
-	if len(aus) != 20 {
-		t.Fatalf("got %d access units, want 20", len(aus))
+	aus := collect(t, stream)
+	if len(aus) != 3 {
+		t.Fatalf("got %d access units, want 3", len(aus))
 	}
+
+	want := []int{1, 0, 1}
 
 	for i, au := range aus {
 		got, err := Markers(au, FormatAnnexB)
@@ -256,32 +226,15 @@ func TestAccessUnitsAppendPlacedMarkerStaysWithItsPicture(t *testing.T) {
 			t.Fatalf("access unit %d: %v", i, err)
 		}
 
-		if len(got) != 1 {
-			t.Fatalf("access unit %d has %d markers, want 1", i, len(got))
-		}
-
-		if got[0].Sequence != uint32(i) {
-			t.Errorf("access unit %d: sequence %d", i, got[0].Sequence)
+		if len(got) != want[i] {
+			t.Fatalf("access unit %d has %d markers, want %d", i, len(got), want[i])
 		}
 	}
-}
 
-func TestAccessUnitsSecondAppendedMarkerStartsANewUnit(t *testing.T) {
-	t.Parallel()
-	// Documented limit: an access unit carries one append-placed marker; a
-	// second one is read as the start of the next access unit.
-	aus := collect(t, annexB(idr, markerNALFor(t, 0), markerNALFor(t, 1)))
-	if len(aus) != 2 {
-		t.Fatalf("got %d access units, want 2", len(aus))
-	}
+	first, _ := Markers(aus[0], FormatAnnexB)
+	third, _ := Markers(aus[2], FormatAnnexB)
 
-	first, err := Markers(aus[0], FormatAnnexB)
-	if err != nil || len(first) != 1 || first[0].Sequence != 0 {
-		t.Fatalf("first unit: %v, %v", first, err)
-	}
-
-	second, err := Markers(aus[1], FormatAnnexB)
-	if err != nil || len(second) != 1 || second[0].Sequence != 1 {
-		t.Fatalf("second unit: %v, %v", second, err)
+	if first[0].Sequence != 0 || third[0].Sequence != 1 {
+		t.Fatalf("sequences %d and %d, want 0 and 1", first[0].Sequence, third[0].Sequence)
 	}
 }

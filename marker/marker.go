@@ -17,17 +17,18 @@ const (
 
 // Body layout from docs/format.md. Each offset follows from the field before it.
 const (
-	offsetVersion       = 0
-	versionSize         = 1
-	offsetFlags         = offsetVersion + versionSize
-	flagsSize           = 1
-	offsetOriginTime    = offsetFlags + flagsSize
-	originTimeSize      = 8
-	offsetSequence      = offsetOriginTime + originTimeSize
-	sequenceSize        = 4
-	offsetStreamID      = offsetSequence + sequenceSize
-	streamIDSize        = 8
-	offsetPayloadLength = offsetStreamID + streamIDSize
+	offsetVersion    = 0
+	versionSize      = 1
+	offsetFlags      = offsetVersion + versionSize
+	flagsSize        = 1
+	offsetOriginTime = offsetFlags + flagsSize
+	originTimeSize   = 8
+	offsetSequence   = offsetOriginTime + originTimeSize
+	sequenceSize     = 4
+	offsetStreamID   = offsetSequence + sequenceSize
+	// StreamIDSize is the length of Marker.StreamID.
+	StreamIDSize        = 8
+	offsetPayloadLength = offsetStreamID + StreamIDSize
 	payloadLengthSize   = 2
 	offsetPayload       = offsetPayloadLength + payloadLengthSize
 )
@@ -70,7 +71,7 @@ type Marker struct {
 	TimeSource TimeSource
 	OriginTime time.Time
 	Sequence   uint32
-	StreamID   [streamIDSize]byte
+	StreamID   [StreamIDSize]byte
 	Payload    []byte
 }
 
@@ -106,7 +107,7 @@ func Decode(body []byte) (Marker, error) {
 		m.TimeSource = TimeCapture
 	}
 
-	copy(m.StreamID[:], body[offsetStreamID:offsetStreamID+streamIDSize])
+	copy(m.StreamID[:], body[offsetStreamID:offsetStreamID+StreamIDSize])
 
 	if flags&flagPayload != 0 {
 		if len(body) < offsetPayload {
@@ -138,7 +139,7 @@ func IsFormatUUID(uuid []byte) bool {
 }
 
 // Encode returns the marker body. The payload flag is set when Payload is non-nil.
-// OriginTime is rounded to microseconds.
+// OriginTime is truncated to microseconds.
 func (m Marker) Encode() ([]byte, error) {
 	if len(m.Payload) > PayloadHardLimit {
 		return nil, fmt.Errorf("%w: %d", ErrPayloadTooLarge, len(m.Payload))
@@ -153,7 +154,7 @@ func (m Marker) Encode() ([]byte, error) {
 
 	binary.BigEndian.PutUint64(out[offsetOriginTime:offsetOriginTime+originTimeSize], uint64(m.OriginTime.UnixMicro()))
 	binary.BigEndian.PutUint32(out[offsetSequence:offsetSequence+sequenceSize], m.Sequence)
-	copy(out[offsetStreamID:offsetStreamID+streamIDSize], m.StreamID[:])
+	copy(out[offsetStreamID:offsetStreamID+StreamIDSize], m.StreamID[:])
 
 	if m.Payload != nil {
 		n := len(m.Payload)

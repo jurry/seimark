@@ -6,16 +6,18 @@ The marker lives inside the compressed frame, so it survives packetisation, medi
 
 ## Status
 
-Phase 1 is done: the Go library reads markers from Annex B streams and MP4
-files, and `seimark dump` prints them. There is no writer and no browser
-library yet. The format is specified in [`docs/format.md`](docs/format.md);
-the roadmap is in [`specs/roadmap.md`](specs/roadmap.md).
+Phase 2 is done: the Go library reads and writes markers, and the CLI has
+`seimark dump`, `seimark inject` and `seimark nals`. The browser library is
+next. The format is specified in [`docs/format.md`](docs/format.md); the
+roadmap is in [`specs/roadmap.md`](specs/roadmap.md).
 
 The module is not public yet, so build it from a clone:
 
 ```
 go build -o seimark ./cmd/seimark
 ./seimark dump recording.mp4
+./seimark inject -start now recording.h264 marked.h264
+./seimark nals marked.h264
 ```
 
 ## What it will be
@@ -29,7 +31,7 @@ go build -o seimark ./cmd/seimark
 ```
 cmd/seimark/  the CLI
 marker/       marker body codec
-h264/         access units, NAL units, markers, Annex B streams
+h264/         access units, NAL units, markers, Annex B streams, the writer
 mp4/          video sample iteration
 specs/        mission, tech stack, roadmap, ADRs
 docs/         format specification, component designs
