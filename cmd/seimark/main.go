@@ -12,6 +12,7 @@ const usage = `usage: seimark <command> [flags] FILE
 commands:
   dump    print the markers found in an Annex B stream or an MP4 file
   inject  write a marker into every access unit of an Annex B stream
+  nals    list the NAL units of each access unit and the SEI messages in them
 
 Exit codes: 0 success, 1 the file could not be read or parsed, 2 usage error.`
 
@@ -40,6 +41,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runDump(args[1:], stdout, stderr)
 	case "inject":
 		return runInject(args[1:], stdout, stderr)
+	case "nals":
+		return runNals(args[1:], stdout, stderr)
 	case "-h", "--help", "help":
 		fmt.Fprintln(stdout, usage)
 

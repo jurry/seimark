@@ -253,7 +253,7 @@ func emit(w *recordWriter, base *record, au []byte, f h264.Format, all bool, war
 		rec.MarkerIndex = &i
 		rec.Version = &v
 		rec.TimeSource = m.TimeSource.String()
-		rec.OriginTime = m.OriginTime.UTC().Format("2006-01-02T15:04:05.000000Z07:00")
+		rec.OriginTime = m.OriginTime.UTC().Format(originTimeLayout)
 		rec.OriginUS = &us
 		rec.Sequence = &seq
 
