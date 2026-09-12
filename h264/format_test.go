@@ -71,3 +71,11 @@ func TestNALUnitsUnknownFormat(t *testing.T) {
 		t.Fatalf("err = %v, want ErrUnknownFormat", err)
 	}
 }
+
+func TestNALUnitsCorruptLengthIsAnError(t *testing.T) {
+	t.Parallel()
+	au := []byte{0, 0, 0, 4, 6, 1, 2, 3, 0xff, 0xff, 0xff, 0xfd, 6, 6}
+	if _, err := Markers(au, FormatLengthPrefixed); err == nil {
+		t.Fatal("corrupt length accepted")
+	}
+}

@@ -59,13 +59,30 @@ func NALUnits(au []byte, f Format) ([][]byte, error) {
 	case FormatAnnexB:
 		return avc.ExtractNalusFromByteStream(au), nil
 	case FormatLengthPrefixed:
-		nalus, err := avc.GetNalusFromSample(au)
-		if err != nil {
-			return nil, fmt.Errorf("seimark: length-prefixed access unit: %w", err)
-		}
-		return nalus, nil
+		return lengthPrefixedNALUnits(au)
 	case FormatUnknown:
 		return nil, ErrUnknownFormat
 	}
 	return nil, ErrUnknownFormat
+}
+
+// lengthPrefixedNALUnits walks four-byte big-endian length prefixes. A length
+// that is zero or runs past the end of au is a corrupt sample, not a panic.
+func lengthPrefixedNALUnits(au []byte) ([][]byte, error) {
+	var nalus [][]byte
+	for pos := 0; pos < len(au); {
+		if len(au)-pos < 4 {
+			return nil, fmt.Errorf("seimark: length-prefixed access unit: %d bytes left at offset %d, need a 4-byte length",
+				len(au)-pos, pos)
+		}
+		length := int(binary.BigEndian.Uint32(au[pos : pos+4]))
+		pos += 4
+		if length < 1 || length > len(au)-pos {
+			return nil, fmt.Errorf("seimark: length-prefixed access unit: NAL unit length %d at offset %d, %d bytes left",
+				length, pos-4, len(au)-pos)
+		}
+		nalus = append(nalus, au[pos:pos+length])
+		pos += length
+	}
+	return nalus, nil
 }
