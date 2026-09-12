@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -45,18 +44,14 @@ func run(inPath, outPath string) error {
 
 	base := time.Date(2026, 9, 11, 21, 0, 0, 0, time.UTC)
 	streamID := [8]byte{0x9f, 0x3c, 0x1a, 0x77, 0xe2, 0xb0, 0x4d, 0x51}
-	index := 0
+	index := uint32(0)
 	for au, err := range h264.AccessUnits(in) {
 		if err != nil {
 			return fmt.Errorf("seimark: read access unit %d: %w", index, err)
 		}
-		if index < 0 || index > math.MaxUint32 {
-			return fmt.Errorf("seimark: sequence %d overflows uint32", index)
-		}
-		sequence := uint32(index)
 		m := marker.Marker{
 			OriginTime: base.Add(time.Duration(index) * 100 * time.Millisecond),
-			Sequence:   sequence,
+			Sequence:   index,
 			StreamID:   streamID,
 		}
 		if index == 0 {
