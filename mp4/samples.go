@@ -7,6 +7,7 @@ import (
 	"io"
 	"iter"
 	"math"
+	"strings"
 
 	"github.com/Eyevinn/mp4ff/mp4"
 )
@@ -65,7 +66,10 @@ func VideoSamples(r io.ReadSeeker) iter.Seq2[Sample, error] {
 	}
 }
 
+// h264Track returns the first video track with an avc1 or avc3 sample entry.
+// A video track in another codec is passed over, not taken as the answer.
 func h264Track(moov *mp4.MoovBox) (*mp4.TrakBox, error) {
+	var seen []string
 	for _, trak := range moov.Traks {
 		if trak.Mdia == nil || trak.Mdia.Hdlr == nil || trak.Mdia.Hdlr.HandlerType != "vide" {
 			continue
@@ -74,16 +78,28 @@ func h264Track(moov *mp4.MoovBox) (*mp4.TrakBox, error) {
 			return nil, fmt.Errorf("%w: video track has no stsd", ErrMalformedFile)
 		}
 		stsd := trak.Mdia.Minf.Stbl.Stsd
-		if stsd.AvcX == nil {
-			name := "unknown"
-			if len(stsd.Children) > 0 {
-				name = stsd.Children[0].Type()
-			}
-			return nil, fmt.Errorf("%w: video track sample entry is %s", ErrNoVideoTrack, name)
+		if stsd.AvcX != nil {
+			return trak, nil
 		}
-		return trak, nil
+		seen = append(seen, sampleEntryName(stsd))
+	}
+	if len(seen) > 0 {
+		return nil, fmt.Errorf("%w: video sample entries are %s", ErrNoVideoTrack, strings.Join(seen, ", "))
 	}
 	return nil, ErrNoVideoTrack
+}
+
+// sampleEntryName names the codec of a sample entry for an error message.
+func sampleEntryName(stsd *mp4.StsdBox) string {
+	for _, e := range []*mp4.VisualSampleEntryBox{stsd.HvcX, stsd.VvcX, stsd.Av01, stsd.Avs3, stsd.Encv} {
+		if e != nil {
+			return e.Type()
+		}
+	}
+	if len(stsd.Children) > 0 {
+		return stsd.Children[0].Type()
+	}
+	return "unknown"
 }
 
 // checkTrackBoxes rejects a track missing a box the sample walk dereferences.

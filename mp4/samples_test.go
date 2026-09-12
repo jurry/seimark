@@ -6,7 +6,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/Eyevinn/mp4ff/mp4"
 
 	"github.com/jurry/seimark/h264"
 )
@@ -255,5 +258,44 @@ func TestVideoSamplesFragmentedSyncFromNonSyncFlagOnly(t *testing.T) {
 	}
 	if syncs != 2 {
 		t.Fatalf("got %d sync samples, want 2", syncs)
+	}
+}
+
+// videoTrak builds the minimum trak boxes h264Track looks at.
+func videoTrak(trackID uint32, stsd *mp4.StsdBox) *mp4.TrakBox {
+	return &mp4.TrakBox{
+		Tkhd: &mp4.TkhdBox{TrackID: trackID},
+		Mdia: &mp4.MdiaBox{
+			Hdlr: &mp4.HdlrBox{HandlerType: "vide"},
+			Mdhd: &mp4.MdhdBox{Timescale: 1000},
+			Minf: &mp4.MinfBox{Stbl: &mp4.StblBox{Stsd: stsd}},
+		},
+	}
+}
+
+func TestH264TrackSkipsNonAVCVideoTrack(t *testing.T) {
+	t.Parallel()
+	hevc := &mp4.StsdBox{HvcX: mp4.NewVisualSampleEntryBox("hvc1")}
+	avc := &mp4.StsdBox{AvcX: mp4.NewVisualSampleEntryBox("avc1")}
+	moov := &mp4.MoovBox{Traks: []*mp4.TrakBox{videoTrak(1, hevc), videoTrak(2, avc)}}
+	got, err := h264Track(moov)
+	if err != nil {
+		t.Fatalf("h264Track: %v", err)
+	}
+	if got.Tkhd.TrackID != 2 {
+		t.Fatalf("track %d, want 2", got.Tkhd.TrackID)
+	}
+}
+
+func TestH264TrackNoAVCTrackNamesEntries(t *testing.T) {
+	t.Parallel()
+	hevc := &mp4.StsdBox{HvcX: mp4.NewVisualSampleEntryBox("hvc1")}
+	moov := &mp4.MoovBox{Traks: []*mp4.TrakBox{videoTrak(1, hevc)}}
+	_, err := h264Track(moov)
+	if !errors.Is(err, ErrNoVideoTrack) {
+		t.Fatalf("err = %v, want ErrNoVideoTrack", err)
+	}
+	if !strings.Contains(err.Error(), "hvc1") {
+		t.Fatalf("err = %v, want it to name the sample entry seen", err)
 	}
 }
