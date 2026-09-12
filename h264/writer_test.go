@@ -205,6 +205,42 @@ func TestMarkWithoutVCLIsAnError(t *testing.T) {
 	}
 }
 
+func TestMarkSkipsEmptyNALUnits(t *testing.T) {
+	t.Parallel()
+
+	w := newTestWriter(t, WriterOptions{})
+	in := []byte{0, 0, 1, 0, 0, 1, 0x65, 0x88, 0x84, 0x00, 0x33, 0xff}
+
+	out, marked, err := w.Mark(in, FormatAnnexB, t0, nil)
+	if err != nil || !marked {
+		t.Fatalf("Mark: marked=%v err=%v", marked, err)
+	}
+
+	if got, want := naluTypes(t, out, FormatAnnexB), []int{6, 5}; !equalInts(got, want) {
+		t.Fatalf("NAL types %v, want %v", got, want)
+	}
+
+	ms, err := Markers(out, FormatAnnexB)
+	if err != nil || len(ms) != 1 {
+		t.Fatalf("Markers: %v %v", ms, err)
+	}
+}
+
+func TestStripMarkersSkipsEmptyNALUnits(t *testing.T) {
+	t.Parallel()
+
+	in := []byte{0, 0, 1, 0, 0, 1, 0x65, 0x88, 0x84, 0x00, 0x33, 0xff}
+
+	out, err := StripMarkers(in, FormatAnnexB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := naluTypes(t, out, FormatAnnexB), []int{5}; !equalInts(got, want) {
+		t.Fatalf("NAL types %v, want %v", got, want)
+	}
+}
+
 func TestMarkReproducesSpecExample(t *testing.T) {
 	t.Parallel()
 

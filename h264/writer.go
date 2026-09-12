@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/Eyevinn/mp4ff/avc"
@@ -63,23 +64,24 @@ func (w *Writer) Sequence() uint32 {
 }
 
 // Mark returns a copy of the access unit with a marker inserted, in the framing
-// f names. It never aliases au: an unmarked unit is copied too. at is rounded to
-// microseconds. A payload above marker.PayloadSoftLimit is still written and
-// reported with ErrPayloadAboveSoftLimit.
+// f names. It never aliases au: an unmarked unit is copied too. Zero-length NAL
+// units, which back-to-back start codes produce, are skipped and do not reach
+// the output. at is truncated to microseconds. A payload above
+// marker.PayloadSoftLimit is still written and reported with
+// ErrPayloadAboveSoftLimit.
 func (w *Writer) Mark(au []byte, f Format, at time.Time, payload []byte) (out []byte, marked bool, err error) {
 	nalus, err := NALUnits(au, f)
 	if err != nil {
 		return nil, false, err
 	}
 
+	nalus = dropEmpty(nalus)
 	if len(nalus) == 0 {
 		return nil, false, fmt.Errorf("seimark: mark access unit: %w", ErrNoVCL)
 	}
 
-	for _, nal := range nalus {
-		if avc.GetNaluType(nal[0]) == avc.NALU_SEI && carriesMarker(nal) {
-			return nil, false, ErrAlreadyMarked
-		}
+	if slices.ContainsFunc(nalus, isMarkerSEI) {
+		return nil, false, ErrAlreadyMarked
 	}
 
 	if w.opts.KeyframesOnly && !hasIDR(nalus) {
@@ -129,10 +131,11 @@ func (w *Writer) markerNAL(at time.Time, payload []byte) ([]byte, error) {
 }
 
 // insertIndex is where the marker NAL unit goes among nalus: after any
-// delimiter, parameter sets and existing SEI, before the first VCL NAL unit.
+// delimiter, parameter sets and existing SEI, before the first VCL NAL unit. An
+// empty NAL unit has no header to read and is skipped, as the reader skips it.
 func insertIndex(nalus [][]byte) (int, error) {
 	for i, nal := range nalus {
-		if avc.IsVideoNaluType(avc.GetNaluType(nal[0])) {
+		if len(nal) > 0 && avc.IsVideoNaluType(avc.GetNaluType(nal[0])) {
 			return i, nil
 		}
 	}
@@ -140,8 +143,29 @@ func insertIndex(nalus [][]byte) (int, error) {
 	return 0, ErrNoVCL
 }
 
+// dropEmpty removes the zero-length NAL units back-to-back start codes produce.
+// They have no header to read and the reader skips them, so the writer does too.
+func dropEmpty(nalus [][]byte) [][]byte {
+	kept := make([][]byte, 0, len(nalus))
+
+	for _, nal := range nalus {
+		if len(nal) > 0 {
+			kept = append(kept, nal)
+		}
+	}
+
+	return kept
+}
+
+// isMarkerSEI reports whether nal is an SEI NAL unit carrying a seimark marker.
+// An empty NAL unit has no header to read and is not one.
+func isMarkerSEI(nal []byte) bool {
+	return len(nal) > 0 && avc.GetNaluType(nal[0]) == avc.NALU_SEI && carriesMarker(nal)
+}
+
 // StripMarkers returns the access unit without the SEI NAL units that carry a
-// seimark marker, rebuilt in the framing f names. It never aliases au.
+// seimark marker, rebuilt in the framing f names. Empty NAL units are dropped
+// along with them, as the reader skips them anyway. It never aliases au.
 func StripMarkers(au []byte, f Format) ([]byte, error) {
 	nalus, err := NALUnits(au, f)
 	if err != nil {
@@ -150,8 +174,8 @@ func StripMarkers(au []byte, f Format) ([]byte, error) {
 
 	kept := make([][]byte, 0, len(nalus))
 
-	for _, nal := range nalus {
-		if avc.GetNaluType(nal[0]) == avc.NALU_SEI && carriesMarker(nal) {
+	for _, nal := range dropEmpty(nalus) {
+		if isMarkerSEI(nal) {
 			continue
 		}
 
@@ -161,9 +185,11 @@ func StripMarkers(au []byte, f Format) ([]byte, error) {
 	return joinNALUnits(kept, f)
 }
 
+// hasIDR reports whether any NAL unit is an IDR picture. An empty NAL unit has
+// no header to read and is skipped.
 func hasIDR(nalus [][]byte) bool {
 	for _, nal := range nalus {
-		if avc.GetNaluType(nal[0]) == avc.NALU_IDR {
+		if len(nal) > 0 && avc.GetNaluType(nal[0]) == avc.NALU_IDR {
 			return true
 		}
 	}
