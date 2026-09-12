@@ -10,7 +10,7 @@
 | MP4 and SEI primitives | `github.com/Eyevinn/mp4ff` (MIT, active) | Solid MP4 parsing including fragmented files, and SEI encode and decode with emulation-prevention handling. Building on it beats duplicating it (ADR 0004). |
 | CLI | Standard library `flag` with subcommands | One binary, three subcommands; a framework would be most of the dependency tree. |
 | Tests | Standard library `testing`, golden files in `vectors/` | The vectors are the format's conformance suite and are shared with the browser package. |
-| Lint | golangci-lint v2 with a small enabled set, see .golangci.yaml | Catches error-handling and style slips the compiler does not; the set stays small so findings are read, not silenced. |
+| Lint | golangci-lint v2, every linter on, each disabled one justified in .golangci.yaml; gofumpt and gci as formatters | Findings are read, not silenced; new linters are on until argued off. |
 | Language, browser | TypeScript | Type checking across the codec and the transform; ships as an npm package. |
 | Browser API | WebRTC Encoded Transform: `RTCRtpScriptTransform` in a worker, with `createEncodedStreams` as the fallback where the standard API is missing | Standard first; the fallback covers older Chromium. Details decided in the phase 3 design. |
 | Format identity | One fixed UUID, see `docs/format.md` | Readers ignore unregistered SEI with any other UUID, so foreign metadata never confuses them. |
