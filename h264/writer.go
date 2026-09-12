@@ -29,6 +29,8 @@ var ErrNoVCL = errors.New("seimark: access unit has no VCL NAL unit")
 // WriterOptions configures a Writer. The zero value means a random stream id,
 // every access unit marked, and time of sending.
 type WriterOptions struct {
+	// StreamID zero means none given: NewWriter draws eight random bytes. A
+	// caller that wants an all-zero id on the wire cannot have one.
 	StreamID      [marker.StreamIDSize]byte
 	KeyframesOnly bool
 	TimeSource    marker.TimeSource

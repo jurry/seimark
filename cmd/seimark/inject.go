@@ -140,6 +140,12 @@ func parseStreamID(s string) ([marker.StreamIDSize]byte, error) {
 
 	copy(id[:], b)
 
+	// The writer reads a zero id as "none given" and draws a random one, so an
+	// explicit zero would be silently replaced.
+	if id == [marker.StreamIDSize]byte{} {
+		return [marker.StreamIDSize]byte{}, errors.New("stream id must not be zero; omit the flag for a random id")
+	}
+
 	return id, nil
 }
 

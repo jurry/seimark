@@ -387,3 +387,16 @@ func TestInjectUsageErrors(t *testing.T) {
 		t.Fatalf("bad stream id: exit %d", code)
 	}
 }
+
+func TestInjectRejectsZeroStreamID(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"inject", "-stream-id", "0000000000000000", "a", "b"}, &stdout, &stderr); code != 2 {
+		t.Fatalf("exit %d, want 2; stderr: %s", code, stderr.String())
+	}
+
+	if !strings.Contains(stderr.String(), "stream id must not be zero; omit the flag for a random id") {
+		t.Fatalf("stderr: %s", stderr.String())
+	}
+}
