@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -93,5 +94,32 @@ func TestDumpUsageErrors(t *testing.T) {
 	}
 	if code := run([]string{"dump", filepath.Join(t.TempDir(), "missing.h264")}, &out, &errOut); code != 1 {
 		t.Fatalf("missing file: exit %d, want 1", code)
+	}
+	unknown := filepath.Join(t.TempDir(), "unknown.bin")
+	if err := os.WriteFile(unknown, []byte("not a stream and not an mp4"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := run([]string{"dump", unknown}, &out, &errOut); code != 2 {
+		t.Fatalf("unrecognised format: exit %d, want 2", code)
+	}
+}
+
+func TestDumpDirectoryIsAnIOError(t *testing.T) {
+	t.Parallel()
+	var out, errOut bytes.Buffer
+	code := run([]string{"dump", t.TempDir()}, &out, &errOut)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1; stderr: %s", code, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "is a directory") {
+		t.Fatalf("stderr = %q, want it to mention the directory", errOut.String())
+	}
+}
+
+func TestDumpHelpExitsZero(t *testing.T) {
+	t.Parallel()
+	var out, errOut bytes.Buffer
+	if code := run([]string{"dump", "-h"}, &out, &errOut); code != 0 {
+		t.Fatalf("exit %d, want 0; stderr: %s", code, errOut.String())
 	}
 }

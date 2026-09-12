@@ -125,7 +125,7 @@ seimark dump [-format auto|annexb|mp4] [-out jsonl|csv] [-all] FILE
   | `payload` | marker, when the flag is set | base64 |
 
 - CSV has the same columns in the same order, with a header line; absent values are empty.
-- A decode error in one access unit is a warning on stderr with the index and the error, and processing continues. Exit code 0 when the file was processed to the end, 1 when it could not be opened or parsed, 2 for usage errors. Warnings do not change the exit code in phase 1.
+- A decode error in one access unit is a warning on stderr with the index and the error, and processing continues. Exit code 0 when the file was processed to the end, 1 when it could not be opened or read, 2 for usage errors, which includes an input whose format cannot be told from its first bytes. `-h` prints the flags and exits 0. Warnings do not change the exit code in phase 1.
 
 ## Test vectors
 

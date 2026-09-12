@@ -37,6 +37,10 @@ type record struct {
 	Payload     *string  `json:"payload,omitempty"`
 }
 
+// errUnknownInput marks a file whose first bytes are neither MP4 nor Annex B,
+// which is a usage problem and not an I/O failure.
+var errUnknownInput = errors.New("cannot tell the input format from its first bytes")
+
 const (
 	formatAuto   = "auto"
 	formatAnnexB = "annexb"
@@ -69,6 +73,9 @@ func parseDumpFlags(args []string, stderr io.Writer) (flags dumpFlags, exitCode 
 	out := fs.String("out", outJSONL, "output format: jsonl or csv")
 	all := fs.Bool("all", false, "also print access units without a marker")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return dumpFlags{}, 0, false
+		}
 		return dumpFlags{}, 2, false
 	}
 	if fs.NArg() != 1 {
@@ -101,9 +108,13 @@ func runDump(args []string, stdout, stderr io.Writer) int {
 	format := flags.format
 	if format == formatAuto {
 		format, err = sniff(f)
-		if err != nil {
+		switch {
+		case errors.Is(err, errUnknownInput):
 			fmt.Fprintf(stderr, "seimark dump: %v; pass -format\n", err)
 			return 2
+		case err != nil:
+			fmt.Fprintf(stderr, "seimark dump: %v\n", err)
+			return 1
 		}
 	}
 	w := newRecordWriter(flags.out, stdout)
@@ -128,10 +139,14 @@ func runDump(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// sniff decides between mp4 and annexb from the first bytes and rewinds.
+// sniff decides between mp4 and annexb from the first bytes and rewinds. A
+// short file is not an error; anything else the read reports is.
 func sniff(f io.ReadSeeker) (string, error) {
 	var head [12]byte
-	n, _ := io.ReadFull(f, head[:])
+	n, err := io.ReadFull(f, head[:])
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return "", fmt.Errorf("seimark: read input: %w", err)
+	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return "", fmt.Errorf("seimark: rewind input: %w", err)
 	}
@@ -144,7 +159,7 @@ func sniff(f io.ReadSeeker) (string, error) {
 	if h264.DetectFormat(head[:n]) == h264.FormatAnnexB {
 		return formatAnnexB, nil
 	}
-	return "", errors.New("cannot tell the input format from its first bytes")
+	return "", errUnknownInput
 }
 
 func dumpAnnexB(r io.Reader, w *recordWriter, all bool, warn func(int, error)) error {
