@@ -1,0 +1,27 @@
+{
+  "name": "seimark",
+  "version": "0.1.0",
+  "description": "Per-frame metadata in H.264 SEI for WebRTC senders",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "files": ["dist"],
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./webrtc": { "types": "./dist/webrtc/index.d.ts", "import": "./dist/webrtc/index.js" }
+  },
+  "typesVersions": { "*": { "webrtc": ["./dist/webrtc/index.d.ts"] } },
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.core.json && tsc --noEmit -p tsconfig.webrtc.json",
+    "build:worker": "node build/worker.mjs",
+    "build": "npm run build:worker && tsc -p tsconfig.webrtc.json",
+    "test": "node --test --experimental-strip-types test/*.test.ts",
+    "e2e": "playwright test"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "esbuild": "^0.24.0",
+    "@playwright/test": "^1.48.0"
+  }
+}
