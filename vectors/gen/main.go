@@ -1,17 +1,13 @@
-// Command gen inserts a seimark marker before the first VCL NAL unit of every
-// access unit of an Annex B stream. Used only to build the fixtures in
-// vectors/streams; the phase 2 writer supersedes it.
+// Command gen stamps an Annex B stream with seimark markers through the h264
+// writer. Used only to build the fixtures in vectors/streams.
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"time"
-
-	"github.com/Eyevinn/mp4ff/avc"
 
 	"github.com/jurry/seimark/h264"
 	"github.com/jurry/seimark/marker"
@@ -22,6 +18,9 @@ const argCount = 3
 
 // expectedAccessUnits is the access-unit count of the fixture in vectors/streams.
 const expectedAccessUnits = 20
+
+// frameInterval is the fixture's 10 frames per second.
+const frameInterval = 100 * time.Millisecond
 
 // Exit codes.
 const (
@@ -59,35 +58,22 @@ func run(inPath, outPath string) error {
 
 	defer func() { _ = out.Close() }()
 
+	w, err := h264.NewWriter(h264.WriterOptions{
+		StreamID: [marker.StreamIDSize]byte{0x9f, 0x3c, 0x1a, 0x77, 0xe2, 0xb0, 0x4d, 0x51},
+	})
+	if err != nil {
+		return fmt.Errorf("seimark: new writer: %w", err)
+	}
+
 	base := time.Date(2026, 9, 12, 21, 0, 0, 0, time.UTC)
-	streamID := [8]byte{0x9f, 0x3c, 0x1a, 0x77, 0xe2, 0xb0, 0x4d, 0x51}
-	index := uint32(0)
+	index := 0
 
 	for au, err := range h264.AccessUnits(in) {
 		if err != nil {
 			return fmt.Errorf("seimark: read access unit %d: %w", index, err)
 		}
 
-		m := marker.Marker{
-			OriginTime: base.Add(time.Duration(index) * 100 * time.Millisecond),
-			Sequence:   index,
-			StreamID:   streamID,
-		}
-		if index == 0 {
-			m.Payload = []byte("testsrc")
-		}
-
-		body, err := m.Encode()
-		if err != nil {
-			return fmt.Errorf("seimark: encode marker %d: %w", index, err)
-		}
-
-		nal, err := h264.UserDataSEINAL(marker.FormatUUID(), body)
-		if err != nil {
-			return fmt.Errorf("seimark: build SEI NAL %d: %w", index, err)
-		}
-
-		if err := writeMarked(out, au, nal); err != nil {
+		if err := markUnit(out, w, au, base, index); err != nil {
 			return err
 		}
 
@@ -101,42 +87,29 @@ func run(inPath, outPath string) error {
 	return nil
 }
 
-// writeMarked writes the access unit with the marker inserted before its first VCL NAL unit.
-func writeMarked(w io.Writer, au, markerNAL []byte) error {
-	nalus, err := h264.NALUnits(au, h264.FormatAnnexB)
+// markUnit writes access unit index of the stream, stamped at its frame time.
+func markUnit(out io.Writer, w *h264.Writer, au []byte, base time.Time, index int) error {
+	// The ffmpeg base stream carries no markers; stripping keeps the generator
+	// right if it is ever run on a stamped stream.
+	stripped, err := h264.StripMarkers(au, h264.FormatAnnexB)
 	if err != nil {
-		return fmt.Errorf("seimark: split access unit: %w", err)
+		return fmt.Errorf("seimark: strip access unit %d: %w", index, err)
 	}
 
-	inserted := false
-	for _, nal := range nalus {
-		if !inserted && avc.IsVideoNaluType(avc.GetNaluType(nal[0])) {
-			if err := writeNAL(w, markerNAL); err != nil {
-				return err
-			}
-
-			inserted = true
-		}
-
-		if err := writeNAL(w, nal); err != nil {
-			return err
-		}
+	var payload []byte
+	if index == 0 {
+		payload = []byte("testsrc")
 	}
 
-	if !inserted {
-		return errors.New("access unit without a VCL NAL unit")
+	at := base.Add(time.Duration(index) * frameInterval)
+
+	marked, _, err := w.Mark(stripped, h264.FormatAnnexB, at, payload)
+	if err != nil {
+		return fmt.Errorf("seimark: mark access unit %d: %w", index, err)
 	}
 
-	return nil
-}
-
-func writeNAL(w io.Writer, nal []byte) error {
-	if _, err := w.Write([]byte{0, 0, 0, 1}); err != nil {
-		return fmt.Errorf("seimark: write start code: %w", err)
-	}
-
-	if _, err := w.Write(nal); err != nil {
-		return fmt.Errorf("seimark: write NAL unit: %w", err)
+	if _, err := out.Write(marked); err != nil {
+		return fmt.Errorf("seimark: write access unit %d: %w", index, err)
 	}
 
 	return nil
