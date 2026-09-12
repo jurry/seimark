@@ -2,6 +2,7 @@ package h264
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 
 	"github.com/Eyevinn/mp4ff/avc"
@@ -23,22 +24,34 @@ func UserDataSEINAL(uuid [16]byte, body []byte) ([]byte, error) {
 	return nal, nil
 }
 
-// Markers returns every seimark marker in the access unit, in order. SEI NAL
-// units that do not parse and unregistered messages with other UUIDs are
-// skipped. A message with the seimark UUID that does not decode ends the scan:
-// the markers found so far are returned together with the error.
+// ErrUnparsableSEI marks an SEI NAL unit that could not be parsed at all. It is
+// advisory: the markers found elsewhere in the access unit are returned with it,
+// and a caller that only wants those can ignore an error that is this one.
+var ErrUnparsableSEI = errors.New("seimark: SEI NAL unit does not parse")
+
+// Markers returns every seimark marker in the access unit, in order.
+// Unregistered messages with other UUIDs are skipped. An SEI NAL unit that does
+// not parse is skipped too, but the scan ends with ErrUnparsableSEI alongside
+// the markers found. A message with the seimark UUID that does not decode ends
+// the scan at once: the markers found so far are returned with that error.
 func Markers(au []byte, f Format) ([]marker.Marker, error) {
 	nalus, err := NALUnits(au, f)
 	if err != nil {
 		return nil, err
 	}
-	var found []marker.Marker
+	var (
+		found      []marker.Marker
+		unparsable error
+	)
 	for _, nal := range nalus {
 		if len(nal) < 2 || avc.GetNaluType(nal[0]) != avc.NALU_SEI {
 			continue
 		}
 		msgs, err := sei.ExtractSEIData(bytes.NewReader(nal[1:]))
 		if err != nil && len(msgs) == 0 {
+			if unparsable == nil {
+				unparsable = fmt.Errorf("%w: %w", ErrUnparsableSEI, err)
+			}
 			continue
 		}
 		for _, msg := range msgs {
@@ -53,5 +66,5 @@ func Markers(au []byte, f Format) ([]marker.Marker, error) {
 			found = append(found, m)
 		}
 	}
-	return found, nil
+	return found, unparsable
 }

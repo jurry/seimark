@@ -85,8 +85,8 @@ func carriesMarker(nal []byte) bool {
 	one := make([]byte, 0, 4+len(nal))
 	one = append(one, 0, 0, 0, 1)
 	one = append(one, nal...)
-	ms, err := Markers(one, FormatAnnexB)
-	return err == nil && len(ms) > 0
+	ms, _ := Markers(one, FormatAnnexB)
+	return len(ms) > 0
 }
 
 func startsAccessUnit(nal []byte, t avc.NaluType) bool {

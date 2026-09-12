@@ -123,3 +123,30 @@ func TestDumpHelpExitsZero(t *testing.T) {
 		t.Fatalf("exit %d, want 0; stderr: %s", code, errOut.String())
 	}
 }
+
+func TestDumpWarnsOnUnparsableSEIAndKeepsGoing(t *testing.T) {
+	t.Parallel()
+	// An SEI NAL unit that mp4ff cannot parse, then a normal fixture access
+	// unit: the marker records are still written and the exit code stays 0.
+	path := filepath.Join("..", "..", "vectors", "streams", "testsrc-marked.h264")
+	stream, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spoiled := filepath.Join(t.TempDir(), "spoiled.h264")
+	garbage := make([]byte, 0, 8+len(stream))
+	garbage = append(garbage, 0, 0, 0, 1, 0x06, 0xff, 0xff, 0xff)
+	if err := os.WriteFile(spoiled, append(garbage, stream...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := run([]string{"dump", "-format", "annexb", spoiled}, &out, &errOut); code != 0 {
+		t.Fatalf("exit %d, want 0; stderr: %s", code, errOut.String())
+	}
+	if n := bytes.Count(out.Bytes(), []byte("\n")); n != 20 {
+		t.Fatalf("%d records, want 20", n)
+	}
+	if !strings.Contains(errOut.String(), "does not parse") {
+		t.Fatalf("stderr = %q, want a warning about the unparsable SEI", errOut.String())
+	}
+}

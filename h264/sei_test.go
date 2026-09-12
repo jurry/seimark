@@ -174,12 +174,12 @@ func TestMarkersMalformedMarkerIsAnError(t *testing.T) {
 	}
 }
 
-func TestMarkersUnparsableSEIIsSkipped(t *testing.T) {
+func TestMarkersUnparsableSEIIsReported(t *testing.T) {
 	t.Parallel()
 	garbage := []byte{0x06, 0xff, 0xff, 0xff} // SEI header, then a payload type that never ends
 	got, err := Markers(annexB(garbage, exampleMarkerNAL(t), idr), FormatAnnexB)
-	if err != nil {
-		t.Fatalf("unparsable foreign SEI became an error: %v", err)
+	if !errors.Is(err, ErrUnparsableSEI) {
+		t.Fatalf("err = %v, want ErrUnparsableSEI", err)
 	}
 	if len(got) != 1 {
 		t.Fatalf("got %d markers, want 1", len(got))
