@@ -93,7 +93,12 @@ func TestNalsErrors(t *testing.T) {
 		t.Fatalf("no file: exit %d", code)
 	}
 
-	if code := run([]string{"nals", "/etc/hostname"}, &out, &errOut); code != 2 {
+	notAStream := filepath.Join(t.TempDir(), "notastream.txt")
+	if err := os.WriteFile(notAStream, []byte("not a stream\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if code := run([]string{"nals", notAStream}, &out, &errOut); code != 2 {
 		t.Fatalf("unrecognisable input: exit %d", code)
 	}
 }
