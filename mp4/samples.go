@@ -23,6 +23,7 @@ type Sample struct {
 }
 
 var (
+	// ErrNoVideoTrack is returned when no track qualifies as an H.264 video track.
 	ErrNoVideoTrack = errors.New("seimark: no H.264 video track")
 
 	// ErrMalformedFile marks sample tables that contradict each other or run

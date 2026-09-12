@@ -10,8 +10,12 @@ import (
 	"github.com/Eyevinn/mp4ff/avc"
 )
 
+// Format is the framing of an access unit's NAL units: start codes or length prefixes.
 type Format int
 
+// FormatUnknown means DetectFormat could not tell Annex B from length-prefixed data.
+// FormatAnnexB means NAL units are delimited by start codes.
+// FormatLengthPrefixed means each NAL unit is preceded by a four-byte big-endian length.
 const (
 	FormatUnknown Format = iota
 	FormatAnnexB
@@ -30,6 +34,7 @@ func (f Format) String() string {
 	return "unknown"
 }
 
+// ErrUnknownFormat is returned when an access unit is in neither recognised framing.
 var ErrUnknownFormat = errors.New("seimark: cannot tell Annex B from length-prefixed data")
 
 // DetectFormat guesses from the first bytes. A start code means Annex B; a

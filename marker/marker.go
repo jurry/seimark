@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// Version is the only marker body version this package encodes and decodes.
 const (
 	Version          = 1
 	FixedSize        = 22
@@ -20,8 +21,11 @@ func FormatUUID() [16]byte {
 	return [16]byte{0x44, 0xa7, 0x3c, 0xb9, 0xb3, 0x6c, 0x45, 0x9a, 0x8f, 0x1a, 0xa3, 0xaa, 0x43, 0x1f, 0x62, 0x4a}
 }
 
+// TimeSource says which event OriginTime records.
 type TimeSource uint8
 
+// TimeSend means OriginTime is when the marker was sent.
+// TimeCapture means OriginTime is when the frame was captured.
 const (
 	TimeSend    TimeSource = 0
 	TimeCapture TimeSource = 1
@@ -47,6 +51,7 @@ type Marker struct {
 	Payload    []byte
 }
 
+// ErrUnsupportedVersion is returned when a marker body's version byte is not Version.
 var (
 	ErrUnsupportedVersion = errors.New("seimark: unsupported marker version")
 	ErrTruncated          = errors.New("seimark: truncated marker body")
@@ -92,6 +97,7 @@ func Decode(body []byte) (Marker, error) {
 // time as a signed 64-bit value, so the two's-complement reinterpretation is
 // the specified conversion and cannot overflow.
 func readInt64(b []byte) int64 {
+	//nolint:gosec // G115: docs/format.md defines the origin time as signed 64-bit; this is the two's-complement read.
 	return int64(binary.BigEndian.Uint64(b))
 }
 

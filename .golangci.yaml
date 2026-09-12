@@ -3,6 +3,10 @@ version: "2"
 # Strict by default: every linter golangci-lint ships is on, and each one that
 # is off says why. A new linter in a new golangci-lint version is therefore on
 # until someone argues it off here.
+#
+# A finding that is wrong at one site gets a //nolint:<linter> // reason on
+# that line, never a config exclusion; config exclusions are only for whole
+# classes of files.
 linters:
   default: all
   disable:
@@ -56,21 +60,24 @@ linters:
           json: snake
     unparam:
       check-exported: false
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
   exclusions:
+    # generated: lax is the default; there is no generated code yet, kept for
+    # when there is.
     generated: lax
+    # common-false-positives: findings that are technically right but almost
+    # always noise, for example G304 on paths that come from the CLI.
+    # std-error-handling: unchecked errors from Close, Flush and the fmt print
+    # family, where no recovery exists.
     presets:
-      - comments
       - common-false-positives
       - std-error-handling
     rules:
-      # docs/format.md defines the origin time as signed 64-bit; readInt64 is
-      # the two's-complement read the format specifies, so there is nothing to
-      # check and G115 has nothing to warn about.
-      - path: marker/marker.go
-        text: "G115"
-        source: "return int64\\(binary\\.BigEndian\\.Uint64\\(b\\)\\)"
-        linters:
-          - gosec
+      # Test code has different economics, so size, duplication, security and
+      # global-fixture rules are off there; correctness linters stay on.
       - path: _test\.go
         linters:
           - dupl
