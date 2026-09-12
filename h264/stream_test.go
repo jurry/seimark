@@ -3,7 +3,12 @@ package h264
 import (
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/jurry/seimark/marker"
 )
 
 var (
@@ -133,5 +138,101 @@ func TestAccessUnitsStopsWhenConsumerStops(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("yielded %d after break", count)
+	}
+}
+
+// markerNALFor builds a marker SEI NAL unit with the given sequence number.
+func markerNALFor(t *testing.T, seq uint32) []byte {
+	t.Helper()
+	body, err := marker.Marker{
+		OriginTime: time.Date(2026, 9, 11, 21, 0, 0, 0, time.UTC),
+		Sequence:   seq,
+		StreamID:   [8]byte{0x9f, 0x3c, 0x1a, 0x77, 0xe2, 0xb0, 0x4d, 0x51},
+	}.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nal, err := UserDataSEINAL(marker.FormatUUID(), body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return nal
+}
+
+// appendPlaced rewrites the Annex B fixture so every marker SEI sits after the
+// slice NAL unit of its access unit instead of before it.
+func appendPlaced(t *testing.T) []byte {
+	t.Helper()
+	in, err := os.Open(filepath.Join("..", "vectors", "streams", "testsrc-marked.h264"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = in.Close() }()
+	var out []byte
+	units := 0
+	for au, err := range AccessUnits(in) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		nalus, err := NALUnits(au, FormatAnnexB)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var markerNAL []byte
+		var rest [][]byte
+		for _, nal := range nalus {
+			if ms, _ := Markers(annexB(nal), FormatAnnexB); len(ms) > 0 {
+				markerNAL = nal
+				continue
+			}
+			rest = append(rest, nal)
+		}
+		if markerNAL == nil {
+			t.Fatalf("access unit %d has no marker", units)
+		}
+		out = append(out, annexB(append(rest, markerNAL)...)...)
+		units++
+	}
+	if units != 20 {
+		t.Fatalf("fixture has %d access units, want 20", units)
+	}
+	return out
+}
+
+func TestAccessUnitsAppendPlacedMarkerStaysWithItsPicture(t *testing.T) {
+	t.Parallel()
+	aus := collect(t, appendPlaced(t))
+	if len(aus) != 20 {
+		t.Fatalf("got %d access units, want 20", len(aus))
+	}
+	for i, au := range aus {
+		got, err := Markers(au, FormatAnnexB)
+		if err != nil {
+			t.Fatalf("access unit %d: %v", i, err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("access unit %d has %d markers, want 1", i, len(got))
+		}
+		if got[0].Sequence != uint32(i) {
+			t.Errorf("access unit %d: sequence %d", i, got[0].Sequence)
+		}
+	}
+}
+
+func TestAccessUnitsSecondAppendedMarkerStartsANewUnit(t *testing.T) {
+	t.Parallel()
+	// Documented limit: an access unit carries one append-placed marker; a
+	// second one is read as the start of the next access unit.
+	aus := collect(t, annexB(idr, markerNALFor(t, 0), markerNALFor(t, 1)))
+	if len(aus) != 2 {
+		t.Fatalf("got %d access units, want 2", len(aus))
+	}
+	first, err := Markers(aus[0], FormatAnnexB)
+	if err != nil || len(first) != 1 || first[0].Sequence != 0 {
+		t.Fatalf("first unit: %v, %v", first, err)
+	}
+	second, err := Markers(aus[1], FormatAnnexB)
+	if err != nil || len(second) != 1 || second[0].Sequence != 1 {
+		t.Fatalf("second unit: %v, %v", second, err)
 	}
 }

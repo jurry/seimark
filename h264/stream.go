@@ -26,35 +26,67 @@ func AccessUnits(r io.Reader) iter.Seq2[[]byte, error] {
 		sc := bufio.NewScanner(r)
 		sc.Buffer(make([]byte, 0, 64<<10), maxNALUnitSize)
 		sc.Split(splitNALUnits)
-		var au []byte
-		sawVCL := false
+		var cur accessUnit
 		for sc.Scan() {
 			nal := sc.Bytes()
 			if len(nal) == 0 {
 				continue
 			}
-			t := avc.GetNaluType(nal[0])
-			if sawVCL && startsAccessUnit(nal, t) {
-				if !yield(au, nil) {
-					return
-				}
-				au = nil
-				sawVCL = false
-			}
-			au = append(au, 0, 0, 0, 1)
-			au = append(au, nal...)
-			if avc.IsVideoNaluType(t) {
-				sawVCL = true
+			if done := cur.add(nal); done != nil && !yield(done, nil) {
+				return
 			}
 		}
 		if err := sc.Err(); err != nil {
 			yield(nil, err)
 			return
 		}
-		if len(au) > 0 {
-			yield(au, nil)
+		if len(cur.bytes) > 0 {
+			yield(cur.bytes, nil)
 		}
 	}
+}
+
+// accessUnit accumulates the NAL units of one access unit.
+type accessUnit struct {
+	bytes     []byte
+	sawVCL    bool
+	hasMarker bool
+}
+
+// add appends nal, returning the finished access unit when nal starts a new one.
+func (a *accessUnit) add(nal []byte) []byte {
+	t := avc.GetNaluType(nal[0])
+	isMarker := t == avc.NALU_SEI && carriesMarker(nal)
+	var done []byte
+	if a.sawVCL && breaksAccessUnit(nal, t, isMarker, a.hasMarker) {
+		done = a.bytes
+		*a = accessUnit{}
+	}
+	a.bytes = append(a.bytes, 0, 0, 0, 1)
+	a.bytes = append(a.bytes, nal...)
+	a.sawVCL = a.sawVCL || avc.IsVideoNaluType(t)
+	a.hasMarker = a.hasMarker || isMarker
+	return done
+}
+
+// breaksAccessUnit reports whether nal starts a new access unit, given that the
+// current one already holds a VCL NAL unit. An append-placed marker belongs to
+// the picture it follows, so it joins the current unit unless that unit already
+// carries a marker of its own.
+func breaksAccessUnit(nal []byte, t avc.NaluType, isMarker, hasMarker bool) bool {
+	if isMarker && !hasMarker {
+		return false
+	}
+	return startsAccessUnit(nal, t)
+}
+
+// carriesMarker reports whether this one SEI NAL unit holds a seimark marker.
+func carriesMarker(nal []byte) bool {
+	one := make([]byte, 0, 4+len(nal))
+	one = append(one, 0, 0, 0, 1)
+	one = append(one, nal...)
+	ms, err := Markers(one, FormatAnnexB)
+	return err == nil && len(ms) > 0
 }
 
 func startsAccessUnit(nal []byte, t avc.NaluType) bool {

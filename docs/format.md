@@ -47,6 +47,8 @@ Big-endian throughout. Fixed part 22 bytes.
 
 Writers insert the marker after any access-unit delimiter, parameter sets and existing SEI NAL units, and before the first VCL NAL unit (types 1 to 5) of the access unit. Appending after the last VCL NAL unit is a documented option for pipelines measured to need it. Readers accept either.
 
+A reader splitting an Annex B byte stream into access units follows the usual rule that an SEI NAL unit after a VCL NAL unit starts the next access unit, with one exception: a marker SEI is attached to the access unit it follows when that unit does not carry a marker yet. This is what makes append placement readable. It gives one append-placed marker per access unit; a second one is read as belonging to the next access unit. Prepend placement has no such limit.
+
 ## Compatibility with MISB ST 0604
 
 Optional and separate: a writer may add the MISB precision time stamp as its own `user_data_unregistered` message with the MISB UUID, carrying the same origin time. Tools that know MISB then read the time; tools that know seimark read everything. The two messages never share a UUID or a body.
