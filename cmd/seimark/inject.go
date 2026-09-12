@@ -203,26 +203,27 @@ func rateFromSPS(in io.ReadSeeker) (float64, error) {
 }
 
 // markOne marks one access unit, reporting to stderr and returning ok=false on
-// an error that should stop the run. A unit without a picture is passed through.
-func markOne(w *h264.Writer, au []byte, at time.Time, index int, stderr io.Writer) ([]byte, bool) {
-	marked, _, err := w.Mark(au, h264.FormatAnnexB, at, nil)
+// an error that should stop the run. A unit without a picture is written
+// unchanged, reported, and counted as unmarked.
+func markOne(w *h264.Writer, au []byte, at time.Time, index int, stderr io.Writer) (out []byte, marked, ok bool) {
+	out, marked, err := w.Mark(au, h264.FormatAnnexB, at, nil)
 
 	switch {
 	case errors.Is(err, h264.ErrAlreadyMarked):
 		fmt.Fprintln(stderr, "seimark inject: input already carries seimark markers")
 
-		return nil, false
+		return nil, false, false
 	case errors.Is(err, h264.ErrNoVCL):
-		fmt.Fprintf(stderr, "seimark inject: access unit %d has no picture; left unmarked\n", index)
+		fmt.Fprintf(stderr, "seimark inject: access unit %d has no picture; written unchanged\n", index)
 
-		return au, true
+		return au, false, true
 	case err != nil:
 		fmt.Fprintf(stderr, "seimark inject: access unit %d: %v\n", index, err)
 
-		return nil, false
+		return nil, false, false
 	}
 
-	return marked, true
+	return out, marked, true
 }
 
 // writeMarked stamps every access unit of in into the output file.
@@ -245,6 +246,7 @@ func writeMarked(in io.Reader, flags *injectFlags, rate float64, stderr io.Write
 
 	buf := bufio.NewWriter(out)
 	index := 0
+	markedUnits := 0
 
 	for au, err := range h264.AccessUnits(in) {
 		if err != nil {
@@ -255,12 +257,16 @@ func writeMarked(in io.Reader, flags *injectFlags, rate float64, stderr io.Write
 
 		at := flags.start.Add(time.Duration(math.Round(float64(index) * float64(time.Second) / rate)))
 
-		marked, ok := markOne(w, au, at, index, stderr)
+		unit, marked, ok := markOne(w, au, at, index, stderr)
 		if !ok {
 			return exitError
 		}
 
-		if _, err := buf.Write(marked); err != nil {
+		if marked {
+			markedUnits++
+		}
+
+		if _, err := buf.Write(unit); err != nil {
 			fmt.Fprintf(stderr, "seimark inject: write: %v\n", err)
 
 			return exitError
@@ -274,6 +280,8 @@ func writeMarked(in io.Reader, flags *injectFlags, rate float64, stderr io.Write
 
 		return exitError
 	}
+
+	fmt.Fprintf(stderr, "seimark inject: marked %d of %d access units\n", markedUnits, index)
 
 	return exitOK
 }

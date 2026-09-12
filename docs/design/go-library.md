@@ -200,6 +200,7 @@ seimark inject [-start RFC3339|now] [-fps N] [-stream-id HEX16] [-keyframes-only
 - Annex B input only in this phase; an MP4 input is refused with exit code 2 and a message that MP4 comes later.
 - Every access unit is marked, or only IDR units with `-keyframes-only`.
 - **Time of unit i** is `start + i / rate`, computed in integer microseconds. `-start` defaults to the current time. The rate comes from `-fps` when given, otherwise from the SPS VUI timing when `timing_info_present_flag` is set: `rate = time_scale / (2 * num_units_in_tick)`, which mp4ff exposes on `avc.SPS.VUI`; the fixture encodes 10 fps as `num_units_in_tick = 1`, `time_scale = 20`. With neither, exit code 2 and a message asking for `-fps`. A raw stream has no other timing; variable frame rate is the MP4 path's job in a later phase.
+- An access unit without a picture, such as a trailing SPS and PPS after a cut, is written unchanged and reported; the final line on stderr says how many units were marked out of how many were read.
 - Input that already carries markers is refused with exit code 1; strip first with a later `-replace` if it is ever wanted.
 - `OUT` is created or truncated. Exit codes as for `dump`.
 

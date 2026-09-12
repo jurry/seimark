@@ -167,6 +167,66 @@ func TestInjectKeyframesOnlyReadsBackOnStandardRule(t *testing.T) {
 	}
 }
 
+func TestInjectReportsUnitWithoutAPicture(t *testing.T) {
+	t.Parallel()
+
+	in := filepath.Join(t.TempDir(), "nopicture.h264")
+	stream := []byte{0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x0d, 0xda, 0x05, 0x82, 0x51, 0, 0, 0, 1, 0x68, 0xce, 0x38, 0x80}
+
+	if err := os.WriteFile(in, stream, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := filepath.Join(t.TempDir(), "out.h264")
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"inject", "-fps", "25", in, out}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+
+	if !strings.Contains(stderr.String(), "marked 0 of 1 access units") {
+		t.Fatalf("stderr: %s", stderr.String())
+	}
+
+	if !strings.Contains(stderr.String(), "no picture") {
+		t.Fatalf("the unit was not reported: %s", stderr.String())
+	}
+
+	written, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(written, stream) {
+		t.Fatalf("the unit was not written unchanged: %x", written)
+	}
+}
+
+func TestInjectMarkedCount(t *testing.T) {
+	t.Parallel()
+
+	in := strippedFixture(t)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"inject", in, filepath.Join(t.TempDir(), "out.h264")}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+
+	if !strings.Contains(stderr.String(), "marked 20 of 20 access units") {
+		t.Fatalf("stderr: %s", stderr.String())
+	}
+
+	stderr.Reset()
+
+	if code := run([]string{"inject", "-keyframes-only", in, filepath.Join(t.TempDir(), "out.h264")}, &stdout, &stderr); code != 0 {
+		t.Fatalf("keyframes-only: exit %d: %s", code, stderr.String())
+	}
+
+	if !strings.Contains(stderr.String(), "marked 2 of 20 access units") {
+		t.Fatalf("keyframes-only stderr: %s", stderr.String())
+	}
+}
+
 func TestInjectRefusesMarkedInput(t *testing.T) {
 	t.Parallel()
 
