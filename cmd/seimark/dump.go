@@ -71,25 +71,34 @@ func parseDumpFlags(args []string, stderr io.Writer) (flags dumpFlags, exitCode 
 	fs.SetOutput(stderr)
 	format := fs.String("format", formatAuto, "input format: auto, annexb or mp4")
 	out := fs.String("out", outJSONL, "output format: jsonl or csv")
+
 	all := fs.Bool("all", false, "also print access units without a marker")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return dumpFlags{}, 0, false
 		}
+
 		return dumpFlags{}, 2, false
 	}
+
 	if fs.NArg() != 1 {
 		fmt.Fprintln(stderr, "seimark dump: exactly one FILE is required")
+
 		return dumpFlags{}, 2, false
 	}
+
 	if *out != outJSONL && *out != outCSV {
 		fmt.Fprintf(stderr, "seimark dump: -out must be jsonl or csv, got %q\n", *out)
+
 		return dumpFlags{}, 2, false
 	}
+
 	if *format != formatAuto && *format != formatAnnexB && *format != formatMP4 {
 		fmt.Fprintf(stderr, "seimark dump: -format must be auto, annexb or mp4, got %q\n", *format)
+
 		return dumpFlags{}, 2, false
 	}
+
 	return dumpFlags{format: *format, out: *out, all: *all, path: fs.Arg(0)}, 0, true
 }
 
@@ -98,11 +107,14 @@ func runDump(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return exitCode
 	}
+
 	f, err := os.Open(flags.path)
 	if err != nil {
 		fmt.Fprintf(stderr, "seimark dump: %v\n", err)
+
 		return 1
 	}
+
 	defer func() { _ = f.Close() }()
 
 	format := flags.format
@@ -111,31 +123,41 @@ func runDump(args []string, stdout, stderr io.Writer) int {
 		switch {
 		case errors.Is(err, errUnknownInput):
 			fmt.Fprintf(stderr, "seimark dump: %v; pass -format\n", err)
+
 			return 2
 		case err != nil:
 			fmt.Fprintf(stderr, "seimark dump: %v\n", err)
+
 			return 1
 		}
 	}
+
 	w := newRecordWriter(flags.out, stdout)
 	warn := func(au int, err error) {
 		fmt.Fprintf(stderr, "seimark dump: access unit %d: %v\n", au, err)
 	}
+
 	var walkErr error
+
 	switch format {
 	case formatAnnexB:
 		walkErr = dumpAnnexB(f, w, flags.all, warn)
 	case formatMP4:
 		walkErr = dumpMP4(f, w, flags.all, warn)
 	}
+
 	if err := w.flush(); err != nil {
 		fmt.Fprintf(stderr, "seimark dump: write: %v\n", err)
+
 		return 1
 	}
+
 	if walkErr != nil {
 		fmt.Fprintf(stderr, "seimark dump: %v\n", walkErr)
+
 		return 1
 	}
+
 	return 0
 }
 
@@ -143,34 +165,42 @@ func runDump(args []string, stdout, stderr io.Writer) int {
 // short file is not an error; anything else the read reports is.
 func sniff(f io.ReadSeeker) (string, error) {
 	var head [12]byte
+
 	n, err := io.ReadFull(f, head[:])
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return "", fmt.Errorf("seimark: read input: %w", err)
 	}
+
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return "", fmt.Errorf("seimark: rewind input: %w", err)
 	}
+
 	if n >= 8 {
 		switch string(head[4:8]) {
 		case "ftyp", "moov", "moof", "styp":
 			return formatMP4, nil
 		}
 	}
+
 	if h264.DetectFormat(head[:n]) == h264.FormatAnnexB {
 		return formatAnnexB, nil
 	}
+
 	return "", errUnknownInput
 }
 
 func dumpAnnexB(r io.Reader, w *recordWriter, all bool, warn func(int, error)) error {
 	index := 0
+
 	for au, err := range h264.AccessUnits(r) {
 		if err != nil {
 			return err
 		}
+
 		emit(w, &record{AU: index}, au, h264.FormatAnnexB, all, warn)
 		index++
 	}
+
 	return nil
 }
 
@@ -179,11 +209,13 @@ func dumpMP4(r io.ReadSeeker, w *recordWriter, all bool, warn func(int, error)) 
 		if err != nil {
 			return err
 		}
+
 		dts, pts, ts, sync := s.DTS, s.PTS, s.Timescale, s.Sync
 		t := float64(pts) / float64(ts)
 		base := record{AU: s.Index, DTS: &dts, PTS: &pts, Timescale: &ts, Sync: &sync, Time: &t}
 		emit(w, &base, s.Data, h264.FormatLengthPrefixed, all, warn)
 	}
+
 	return nil
 }
 
@@ -194,12 +226,15 @@ func emit(w *recordWriter, base *record, au []byte, f h264.Format, all bool, war
 	if err != nil {
 		warn(base.AU, err)
 	}
+
 	if len(markers) == 0 {
 		if all {
 			w.write(base)
 		}
+
 		return
 	}
+
 	for i, m := range markers {
 		rec := *base
 		v := marker.Version
@@ -211,11 +246,13 @@ func emit(w *recordWriter, base *record, au []byte, f h264.Format, all bool, war
 		rec.OriginTime = m.OriginTime.UTC().Format("2006-01-02T15:04:05.000000Z07:00")
 		rec.OriginUS = &us
 		rec.Sequence = &seq
+
 		rec.StreamID = hex.EncodeToString(m.StreamID[:])
 		if m.Payload != nil {
 			p := base64.StdEncoding.EncodeToString(m.Payload)
 			rec.Payload = &p
 		}
+
 		w.write(&rec)
 	}
 }
@@ -230,8 +267,10 @@ func newRecordWriter(format string, out io.Writer) *recordWriter {
 	if format == outCSV {
 		w := csv.NewWriter(out)
 		_ = w.Write(csvHeader())
+
 		return &recordWriter{csv: w}
 	}
+
 	return &recordWriter{jsonl: bufio.NewWriter(out)}
 }
 
@@ -239,15 +278,20 @@ func (w *recordWriter) write(r *record) {
 	if w.err != nil {
 		return
 	}
+
 	if w.csv != nil {
 		w.err = w.csv.Write(csvRow(r))
+
 		return
 	}
+
 	line, err := json.Marshal(r)
 	if err != nil {
 		w.err = err
+
 		return
 	}
+
 	line = append(line, '\n')
 	_, w.err = w.jsonl.Write(line)
 }
@@ -256,16 +300,21 @@ func (w *recordWriter) flush() error {
 	if w.err != nil {
 		return w.err
 	}
+
 	if w.csv != nil {
 		w.csv.Flush()
+
 		if err := w.csv.Error(); err != nil {
 			return fmt.Errorf("seimark: write csv: %w", err)
 		}
+
 		return nil
 	}
+
 	if err := w.jsonl.Flush(); err != nil {
 		return fmt.Errorf("seimark: write jsonl: %w", err)
 	}
+
 	return nil
 }
 
@@ -275,9 +324,11 @@ func csvField(v any) string {
 	if s, ok := v.(string); ok {
 		return s
 	}
+
 	if csvFieldIsNil(v) {
 		return ""
 	}
+
 	switch x := v.(type) {
 	case *uint64:
 		return strconv.FormatUint(*x, 10)
@@ -294,6 +345,7 @@ func csvField(v any) string {
 	case *string:
 		return *x
 	}
+
 	return ""
 }
 
@@ -316,6 +368,7 @@ func csvFieldIsNil(v any) bool {
 	case *string:
 		return x == nil
 	}
+
 	return false
 }
 

@@ -13,6 +13,9 @@ import (
 // approaches it at the resolutions seimark is used with.
 const maxNALUnitSize = 16 << 20
 
+// initialScanBufferSize is the scanner's starting buffer; it grows to maxNALUnitSize as needed.
+const initialScanBufferSize = 64 << 10
+
 func startCode() []byte {
 	return []byte{0, 0, 1}
 }
@@ -24,22 +27,28 @@ func startCode() []byte {
 func AccessUnits(r io.Reader) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
 		sc := bufio.NewScanner(r)
-		sc.Buffer(make([]byte, 0, 64<<10), maxNALUnitSize)
+		sc.Buffer(make([]byte, 0, initialScanBufferSize), maxNALUnitSize)
 		sc.Split(splitNALUnits)
+
 		var cur accessUnit
+
 		for sc.Scan() {
 			nal := sc.Bytes()
 			if len(nal) == 0 {
 				continue
 			}
+
 			if done := cur.add(nal); done != nil && !yield(done, nil) {
 				return
 			}
 		}
+
 		if err := sc.Err(); err != nil {
 			yield(nil, err)
+
 			return
 		}
+
 		if len(cur.bytes) > 0 {
 			yield(cur.bytes, nil)
 		}
@@ -57,15 +66,18 @@ type accessUnit struct {
 func (a *accessUnit) add(nal []byte) []byte {
 	t := avc.GetNaluType(nal[0])
 	isMarker := t == avc.NALU_SEI && carriesMarker(nal)
+
 	var done []byte
 	if a.sawVCL && breaksAccessUnit(nal, t, isMarker, a.hasMarker) {
 		done = a.bytes
 		*a = accessUnit{}
 	}
+
 	a.bytes = append(a.bytes, 0, 0, 0, 1)
 	a.bytes = append(a.bytes, nal...)
 	a.sawVCL = a.sawVCL || avc.IsVideoNaluType(t)
 	a.hasMarker = a.hasMarker || isMarker
+
 	return done
 }
 
@@ -77,6 +89,7 @@ func breaksAccessUnit(nal []byte, t avc.NaluType, isMarker, hasMarker bool) bool
 	if isMarker && !hasMarker {
 		return false
 	}
+
 	return startsAccessUnit(nal, t)
 }
 
@@ -86,6 +99,7 @@ func carriesMarker(nal []byte) bool {
 	one = append(one, 0, 0, 0, 1)
 	one = append(one, nal...)
 	ms, _ := Markers(one, FormatAnnexB)
+
 	return len(ms) > 0
 }
 
@@ -100,6 +114,7 @@ func startsAccessUnit(nal []byte, t avc.NaluType) bool {
 	case avc.NALU_EO_SEQ, avc.NALU_EO_STREAM, avc.NALU_FILL:
 		return false
 	}
+
 	return false
 }
 
@@ -108,22 +123,29 @@ func startsAccessUnit(nal []byte, t avc.NaluType) bool {
 // so they are trimmed.
 func splitNALUnits(data []byte, atEOF bool) (advance int, token []byte, err error) {
 	sc := startCode()
+
 	begin := bytes.Index(data, sc)
 	if begin < 0 {
 		if atEOF {
 			return len(data), nil, nil
 		}
+
 		return 0, nil, nil
 	}
+
 	begin += len(sc)
+
 	next := bytes.Index(data[begin:], sc)
 	if next < 0 {
 		if !atEOF {
 			return 0, nil, nil
 		}
+
 		return len(data), trimZeros(data[begin:]), nil
 	}
+
 	end := begin + next
+
 	return end, trimZeros(data[begin:end]), nil
 }
 
@@ -132,5 +154,6 @@ func trimZeros(b []byte) []byte {
 	if len(b) == 0 {
 		return nil
 	}
+
 	return b
 }

@@ -31,11 +31,15 @@ func (f Format) String() string {
 	case FormatUnknown:
 		return "unknown"
 	}
+
 	return "unknown"
 }
 
 // ErrUnknownFormat is returned when an access unit is in neither recognised framing.
 var ErrUnknownFormat = errors.New("seimark: cannot tell Annex B from length-prefixed data")
+
+// minLengthPrefixedSize is a four-byte length prefix plus at least one NAL unit byte.
+const minLengthPrefixedSize = 5
 
 // DetectFormat guesses from the first bytes. A start code means Annex B; a
 // plausible four-byte length means length-prefixed.
@@ -43,12 +47,14 @@ func DetectFormat(au []byte) Format {
 	if hasStartCode(au) {
 		return FormatAnnexB
 	}
-	if len(au) >= 5 {
+
+	if len(au) >= minLengthPrefixedSize {
 		n := binary.BigEndian.Uint32(au[:4])
 		if n >= 1 && int(n) <= len(au)-4 {
 			return FormatLengthPrefixed
 		}
 	}
+
 	return FormatUnknown
 }
 
@@ -68,6 +74,7 @@ func NALUnits(au []byte, f Format) ([][]byte, error) {
 	case FormatUnknown:
 		return nil, ErrUnknownFormat
 	}
+
 	return nil, ErrUnknownFormat
 }
 
@@ -75,19 +82,24 @@ func NALUnits(au []byte, f Format) ([][]byte, error) {
 // that is zero or runs past the end of au is a corrupt sample, not a panic.
 func lengthPrefixedNALUnits(au []byte) ([][]byte, error) {
 	var nalus [][]byte
+
 	for pos := 0; pos < len(au); {
 		if len(au)-pos < 4 {
 			return nil, fmt.Errorf("seimark: length-prefixed access unit: %d bytes left at offset %d, need a 4-byte length",
 				len(au)-pos, pos)
 		}
+
 		length := int(binary.BigEndian.Uint32(au[pos : pos+4]))
+
 		pos += 4
 		if length < 1 || length > len(au)-pos {
 			return nil, fmt.Errorf("seimark: length-prefixed access unit: NAL unit length %d at offset %d, %d bytes left",
 				length, pos-4, len(au)-pos)
 		}
+
 		nalus = append(nalus, au[pos:pos+length])
 		pos += length
 	}
+
 	return nalus, nil
 }

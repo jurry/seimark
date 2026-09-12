@@ -19,19 +19,23 @@ const (
 
 func unhex(t *testing.T, s string) []byte {
 	t.Helper()
+
 	b, err := hex.DecodeString(strings.ReplaceAll(s, " ", ""))
 	if err != nil {
 		t.Fatalf("bad hex %q: %v", s, err)
 	}
+
 	return b
 }
 
 func TestUserDataSEINALMatchesSpecExample(t *testing.T) {
 	t.Parallel()
+
 	got, err := UserDataSEINAL(marker.FormatUUID(), unhex(t, exampleBodyHex))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if want := unhex(t, exampleNALHex); !bytes.Equal(got, want) {
 		t.Fatalf("got  %x\nwant %x", got, want)
 	}
@@ -39,14 +43,18 @@ func TestUserDataSEINALMatchesSpecExample(t *testing.T) {
 
 func TestUserDataSEINALLargeBodyUsesMultiBytePayloadSize(t *testing.T) {
 	t.Parallel()
+
 	body := bytes.Repeat([]byte{0x11}, 300) // payloadSize 316 = 0xff + 0x3d
+
 	got, err := UserDataSEINAL(marker.FormatUUID(), body)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if got[0] != 0x06 || got[1] != 0x05 || got[2] != 0xff || got[3] != 0x3d {
 		t.Fatalf("header bytes %x, want 06 05 ff 3d", got[:4])
 	}
+
 	if got[len(got)-1] != 0x80 {
 		t.Fatalf("last byte %x, want 80", got[len(got)-1])
 	}
@@ -58,6 +66,7 @@ func annexB(nalus ...[]byte) []byte {
 		out = append(out, 0, 0, 0, 1)
 		out = append(out, n...)
 	}
+
 	return out
 }
 
@@ -67,6 +76,7 @@ func lengthPrefixed(nalus ...[]byte) []byte {
 		out = append(out, byte(len(n)>>24), byte(len(n)>>16), byte(len(n)>>8), byte(len(n)))
 		out = append(out, n...)
 	}
+
 	return out
 }
 
@@ -84,22 +94,27 @@ func exampleMarkerNAL(t *testing.T) []byte {
 
 func foreignSEINAL(t *testing.T) []byte {
 	t.Helper()
+
 	var uuid [16]byte
 	copy(uuid[:], "x264-user-data!!")
+
 	nal, err := UserDataSEINAL(uuid, []byte("x264 - core 164 r3108"))
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	return nal
 }
 
 func TestMarkersFindsOneBeforeVCL(t *testing.T) {
 	t.Parallel()
 	au := annexB(sps, pps, exampleMarkerNAL(t), idr)
+
 	got, err := Markers(au, FormatAnnexB)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(got) != 1 || got[0].Sequence != 0 || got[0].StreamID != [8]byte{0x9f, 0x3c, 0x1a, 0x77, 0xe2, 0xb0, 0x4d, 0x51} {
 		t.Fatalf("got %+v", got)
 	}
@@ -108,10 +123,12 @@ func TestMarkersFindsOneBeforeVCL(t *testing.T) {
 func TestMarkersLengthPrefixedAndAppended(t *testing.T) {
 	t.Parallel()
 	au := lengthPrefixed(nonIDR, exampleMarkerNAL(t))
+
 	got, err := Markers(au, FormatLengthPrefixed)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(got) != 1 {
 		t.Fatalf("got %d markers, want 1", len(got))
 	}
@@ -120,10 +137,12 @@ func TestMarkersLengthPrefixedAndAppended(t *testing.T) {
 func TestMarkersSkipsForeignSEI(t *testing.T) {
 	t.Parallel()
 	au := annexB(foreignSEINAL(t), exampleMarkerNAL(t), idr)
+
 	got, err := Markers(au, FormatAnnexB)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(got) != 1 {
 		t.Fatalf("got %d markers, want 1", len(got))
 	}
@@ -131,20 +150,26 @@ func TestMarkersSkipsForeignSEI(t *testing.T) {
 
 func TestMarkersTwoInOneAccessUnitKeepOrder(t *testing.T) {
 	t.Parallel()
+
 	second := marker.Marker{OriginTime: time.Unix(1789246800, 0), Sequence: 9, StreamID: [8]byte{1, 2, 3, 4, 5, 6, 7, 8}}
+
 	body, err := second.Encode()
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	secondNAL, err := UserDataSEINAL(marker.FormatUUID(), body)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	au := annexB(exampleMarkerNAL(t), secondNAL, idr)
+
 	got, err := Markers(au, FormatAnnexB)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if len(got) != 2 || got[0].Sequence != 0 || got[1].Sequence != 9 {
 		t.Fatalf("got %+v", got)
 	}
@@ -152,6 +177,7 @@ func TestMarkersTwoInOneAccessUnitKeepOrder(t *testing.T) {
 
 func TestMarkersNoSEI(t *testing.T) {
 	t.Parallel()
+
 	got, err := Markers(annexB(sps, pps, idr), FormatAnnexB)
 	if err != nil || len(got) != 0 {
 		t.Fatalf("got %v, %v; want none", got, err)
@@ -160,15 +186,19 @@ func TestMarkersNoSEI(t *testing.T) {
 
 func TestMarkersMalformedMarkerIsAnError(t *testing.T) {
 	t.Parallel()
+
 	bad, err := UserDataSEINAL(marker.FormatUUID(), []byte{0x02, 0x00, 0x00}) // version 2, truncated
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	au := annexB(exampleMarkerNAL(t), bad, idr)
+
 	got, err := Markers(au, FormatAnnexB)
 	if !errors.Is(err, marker.ErrUnsupportedVersion) && !errors.Is(err, marker.ErrTruncated) {
 		t.Fatalf("err = %v, want a marker error", err)
 	}
+
 	if len(got) != 1 {
 		t.Fatalf("markers found before the error: %d, want 1", len(got))
 	}
@@ -176,11 +206,14 @@ func TestMarkersMalformedMarkerIsAnError(t *testing.T) {
 
 func TestMarkersUnparsableSEIIsReported(t *testing.T) {
 	t.Parallel()
+
 	garbage := []byte{0x06, 0xff, 0xff, 0xff} // SEI header, then a payload type that never ends
+
 	got, err := Markers(annexB(garbage, exampleMarkerNAL(t), idr), FormatAnnexB)
 	if !errors.Is(err, ErrUnparsableSEI) {
 		t.Fatalf("err = %v, want ErrUnparsableSEI", err)
 	}
+
 	if len(got) != 1 {
 		t.Fatalf("got %d markers, want 1", len(got))
 	}

@@ -38,6 +38,7 @@ func (s TimeSource) String() string {
 	case TimeCapture:
 		return "capture"
 	}
+
 	return fmt.Sprintf("time_source(%d)", uint8(s))
 }
 
@@ -68,10 +69,13 @@ func Decode(body []byte) (Marker, error) {
 	if len(body) < FixedSize {
 		return Marker{}, fmt.Errorf("%w: %d bytes, need %d", ErrTruncated, len(body), FixedSize)
 	}
+
 	if body[0] != Version {
 		return Marker{}, fmt.Errorf("%w: %d", ErrUnsupportedVersion, body[0])
 	}
+
 	flags := body[1]
+
 	m := Marker{
 		OriginTime: time.UnixMicro(readInt64(body[2:10])).UTC(),
 		Sequence:   binary.BigEndian.Uint32(body[10:14]),
@@ -79,17 +83,22 @@ func Decode(body []byte) (Marker, error) {
 	if flags&flagTimeCapture != 0 {
 		m.TimeSource = TimeCapture
 	}
+
 	copy(m.StreamID[:], body[14:22])
+
 	if flags&flagPayload != 0 {
 		if len(body) < FixedSize+2 {
 			return Marker{}, fmt.Errorf("%w: payload flag set but no length", ErrTruncated)
 		}
+
 		n := int(binary.BigEndian.Uint16(body[22:24]))
 		if len(body) < FixedSize+2+n {
 			return Marker{}, fmt.Errorf("%w: payload length %d, %d bytes left", ErrTruncated, n, len(body)-FixedSize-2)
 		}
+
 		m.Payload = append([]byte{}, body[24:24+n]...)
 	}
+
 	return m, nil
 }
 
@@ -112,22 +121,28 @@ func (m Marker) Encode() ([]byte, error) {
 	if len(m.Payload) > PayloadHardLimit {
 		return nil, fmt.Errorf("%w: %d", ErrPayloadTooLarge, len(m.Payload))
 	}
+
 	out := make([]byte, FixedSize, FixedSize+2+len(m.Payload))
+
 	out[0] = Version
 	if m.TimeSource == TimeCapture {
 		out[1] |= flagTimeCapture
 	}
+
 	binary.BigEndian.PutUint64(out[2:10], uint64(m.OriginTime.UnixMicro()))
 	binary.BigEndian.PutUint32(out[10:14], m.Sequence)
 	copy(out[14:22], m.StreamID[:])
+
 	if m.Payload != nil {
 		n := len(m.Payload)
 		if n > PayloadHardLimit {
 			return nil, fmt.Errorf("%w: %d", ErrPayloadTooLarge, n)
 		}
+
 		out[1] |= flagPayload
 		out = binary.BigEndian.AppendUint16(out, uint16(n))
 		out = append(out, m.Payload...)
 	}
+
 	return out, nil
 }

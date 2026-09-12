@@ -19,14 +19,11 @@ linters:
     - goheader        # no licence header policy
     - gomodguard      # no module policy beyond the single dependency
     - ireturn         # iter.Seq2 is an interface-shaped return by design
-    - mnd             # bitstream code is made of specified numbers; named constants for each would hide the spec
-    - nlreturn        # whitespace before return is style, not correctness
     - noinlineerr     # inline error handling is idiomatic Go
     - nonamedreturns  # named returns are fine when they document meaning
     - testpackage     # white-box tests are wanted for a codec
     - varnamelen      # short names in short scopes are idiomatic
-    - wsl             # whitespace rules beyond gofumpt add churn without clarity (deprecated alias, still enabled by default: all)
-    - wsl_v5          # whitespace rules beyond gofumpt add churn without clarity
+    - wsl             # deprecated alias of wsl_v5, which is enabled
   settings:
     cyclop:
       max-complexity: 15
@@ -48,6 +45,16 @@ linters:
       min-occurrences: 3
     lll:
       line-length: 140
+    # mnd: byte widths and tiny counts read better inline; everything else
+    # gets a name from the specification.
+    mnd:
+      ignored-numbers:
+        - "0"
+        - "1"
+        - "2"
+        - "4"
+        - "8"
+        - "16"
     nakedret:
       max-func-lines: 1
     revive:
@@ -90,6 +97,8 @@ linters:
           - lll
           - maintidx
           - gochecknoglobals
+          - mnd
+          - nlreturn
 
 formatters:
   enable:
