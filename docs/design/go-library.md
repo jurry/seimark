@@ -1,6 +1,6 @@
 # Design: Go library and CLI
 
-**Type:** LIVING. Describes the Go side as designed for phase 1 (reader and `dump`); rewritten as later phases change it. Approved 2026-09-12.
+**Type:** LIVING. Describes the Go side: phase 1 (reader and `dump`, shipped) and phase 2 (writer, `inject`, `nals`, approved 2026-09-12). Rewritten as later phases change it.
 
 ## Shape
 
@@ -9,9 +9,9 @@ Module `github.com/jurry/seimark`, Go 1.26, `CGO_ENABLED=0`, one dependency: `gi
 | Package | Owns | Depends on |
 |---|---|---|
 | `marker` | The marker body codec from `docs/format.md`: types, constants, `Decode`, `Encode`, errors. | standard library |
-| `h264` | Access-unit level work: format detection, NAL unit splitting, finding markers in an access unit, splitting an Annex B byte stream into access units. | `marker`, mp4ff `avc` and `sei` |
+| `h264` | Access-unit level work: format detection, NAL unit splitting, finding markers in an access unit, splitting an Annex B byte stream into access units, and the writer that puts markers into access units. | `marker`, mp4ff `avc` and `sei` |
 | `mp4` | Iterating the video samples of an MP4 file, progressive or fragmented, with timing and sync flags. | mp4ff `mp4` |
-| `cmd/seimark` | The CLI. Phase 1: `dump`. | all of the above |
+| `cmd/seimark` | The CLI: `dump`, `inject`, `nals`. | all of the above |
 
 Principles: bytes in, bytes out, no ownership tricks beyond documented subslicing; no state except in the phase 2 writer; iterators (`iter.Seq2`) for anything that can be large; errors returned with context, never logged; nothing in the library prints.
 
@@ -160,6 +160,75 @@ vectors/
 - Golden: every vector file decoded and compared; `seimark dump` output on every stream fixture compared with its `.jsonl`.
 - `Makefile`: `test`, `vet`, `fmt-check`, `build`, all under `CGO_ENABLED=0`; `vectors` regenerates the stream fixtures and needs ffmpeg.
 
-## Out of scope for phase 1
+## The writer, in `h264` (phase 2)
 
-Writing markers into streams, placement options, the stateful writer, `inject`, `nals`, the browser package, MISB compatibility, HEVC, writing MP4.
+The writer is a library for live use first: a Go publisher or capture pipeline calls it once per frame with the clock reading of that frame. Offline stamping of files is the same call driven by `inject`.
+
+```go
+type Placement int
+const (
+    PlacementBeforeVCL Placement = iota // after AUD, SPS, PPS and existing SEI, before the first VCL NAL unit
+    PlacementAppend                     // after the last NAL unit; for pipelines measured to need it
+)
+
+type WriterOptions struct {
+    StreamID      [marker.StreamIDSize]byte // zero value: eight random bytes
+    Placement     Placement
+    KeyframesOnly bool
+    TimeSource    marker.TimeSource
+}
+
+type Writer struct{ /* stream id, next sequence, options */ }
+
+func NewWriter(opts WriterOptions) (*Writer, error)
+func (w *Writer) StreamID() [marker.StreamIDSize]byte
+func (w *Writer) Sequence() uint32 // the sequence the next marked unit receives
+func (w *Writer) Mark(au []byte, f Format, at time.Time, payload []byte) (out []byte, marked bool, err error)
+
+var ErrAlreadyMarked error
+var ErrPayloadAboveSoftLimit error // advisory: the unit was marked
+
+func StripMarkers(au []byte, f Format) ([]byte, error)
+```
+
+- **`Mark`** returns a new access unit in the same format as its input: Annex B with four-byte start codes, or four-byte length prefixes. It never aliases the input. The marker body carries `at` rounded to microseconds, the writer's stream id, the next sequence number and the payload; `TimeSource` from the options goes into the flags.
+- **Sequence** starts at 0 and increments once per marked unit, wrapping modulo 2^32, as the format says. Units left unmarked by `KeyframesOnly` do not consume a number.
+- **Keyframes** are access units that contain an IDR NAL unit (type 5). With `KeyframesOnly`, other units are returned unchanged with `marked == false`.
+- **Already marked** units make `Mark` return `ErrAlreadyMarked` and leave the sequence untouched; the caller decides. `StripMarkers` removes every SEI NAL unit that carries a seimark marker and returns the unit rebuilt in its own format, which is how `inject` and the fixture generator get a clean starting point.
+- **Payload** above `marker.PayloadHardLimit` is an error and nothing is marked; above `marker.PayloadSoftLimit` the unit is marked and `ErrPayloadAboveSoftLimit` is returned alongside it, so a caller can log without losing the frame.
+- **Placement** follows `docs/format.md`. For `PlacementBeforeVCL` the marker goes after any AUD, SPS, PPS and existing SEI and before the first VCL NAL unit; a unit without a VCL NAL unit is an error.
+
+## `seimark inject`
+
+```
+seimark inject [-start RFC3339|now] [-fps N] [-stream-id HEX16] [-placement before-vcl|append] [-keyframes-only] IN OUT
+```
+
+- Annex B input only in this phase; an MP4 input is refused with exit code 2 and a message that MP4 comes later.
+- Every access unit is marked, or only IDR units with `-keyframes-only`.
+- **Time of unit i** is `start + i / rate`, computed in integer microseconds. `-start` defaults to the current time. The rate comes from `-fps` when given, otherwise from the SPS VUI timing when `timing_info_present_flag` is set: `rate = time_scale / (2 * num_units_in_tick)`, which mp4ff exposes on `avc.SPS.VUI`; the fixture encodes 10 fps as `num_units_in_tick = 1`, `time_scale = 20`. With neither, exit code 2 and a message asking for `-fps`. A raw stream has no other timing; variable frame rate is the MP4 path's job in a later phase.
+- Input that already carries markers is refused with exit code 1; strip first with a later `-replace` if it is ever wanted.
+- `OUT` is created or truncated. Exit codes as for `dump`.
+
+## `seimark nals`
+
+```
+seimark nals [-format auto|annexb|mp4] FILE
+```
+
+Text output for debugging, one block per access unit: the unit index and, when the input is MP4, its DTS and PTS; then one line per NAL unit with its type name, size in bytes, and for SEI NAL units the messages found: seimark markers decoded (sequence, origin time, stream id, payload size), other unregistered user data with their UUID in hex, other message types by number. Same format detection and exit codes as `dump`.
+
+## Fixture generator
+
+`vectors/gen` calls the writer instead of inserting NAL units itself: fixed stream id, start `2026-09-12T21:00:00Z`, 10 fps, payload `testsrc` on the first unit. Regenerating must reproduce the committed fixtures byte for byte, and a test proves the equivalent without ffmpeg: strip the markers from the committed Annex B fixture, mark it again with the same parameters, compare bytes.
+
+## Tests, phase 2
+
+- Writer: round trip of every marker vector through `Mark` and `Markers`; placement before VCL on units with and without parameter sets and with a foreign SEI; append placement; keyframes-only on the fixture yields two markers with sequences 0 and 1; `ErrAlreadyMarked`; soft and hard payload limits; length-prefixed input produces length-prefixed output; the output never aliases the input.
+- `StripMarkers`: fixture stripped has no markers and the same NAL units otherwise; stripping an unmarked unit is a no-op.
+- `inject`: the stripped fixture injected with the fixture's parameters equals the fixture; `-fps` overrides the SPS; a stream without VUI timing and without `-fps` exits 2; a marked input exits 1; `-keyframes-only` yields two markers.
+- `nals`: the fixture lists 20 units, each with one seimark SEI line; the first unit also shows the x264 user data as foreign.
+
+## Later phases
+
+The browser package, MISB ST 0604 compatibility, MP4 input and output for `inject`, lazy MP4 reading, HEVC.
