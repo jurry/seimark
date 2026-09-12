@@ -184,16 +184,29 @@ func runInject(args []string, _, stderr io.Writer) int {
 		return exitUsage
 	}
 
+	return injectStream(in, &flags, stderr)
+}
+
+// injectStream resolves the frame rate and writes the marked stream. It takes
+// the reader so a test can drive it without a file on disk.
+func injectStream(in io.ReadSeeker, flags *injectFlags, stderr io.Writer) int {
 	rate := flags.fps
 	if rate == 0 {
+		var err error
 		if rate, err = rateFromSPS(in); err != nil {
 			fmt.Fprintf(stderr, "seimark inject: %v\n", err)
 
-			return exitUsage
+			// Only a stream that names no rate is the user's mistake; a stream
+			// that could not be read or parsed is a failure like any other.
+			if errors.Is(err, errNoRate) {
+				return exitUsage
+			}
+
+			return exitError
 		}
 	}
 
-	return writeMarked(in, &flags, rate, stderr)
+	return writeMarked(in, flags, rate, stderr)
 }
 
 // sameFile reports whether outPath names the file already open as in, which

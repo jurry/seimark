@@ -334,6 +334,37 @@ func TestRateFromSPSValueNeedsTiming(t *testing.T) {
 	}
 }
 
+// errReader is an Annex B prefix followed by a read failure, so the rate probe
+// fails to read rather than failing to find a rate.
+type errReader struct{ done bool }
+
+func (r *errReader) Read(p []byte) (int, error) {
+	if r.done {
+		return 0, errors.New("boom")
+	}
+
+	r.done = true
+
+	return copy(p, []byte{0, 0, 0, 1, 0x67, 0x42}), nil
+}
+
+func (r *errReader) Seek(int64, int) (int64, error) {
+	r.done = false
+
+	return 0, nil
+}
+
+func TestInjectRateProbeReadErrorExitsOne(t *testing.T) {
+	t.Parallel()
+
+	flags := injectFlags{outPath: filepath.Join(t.TempDir(), "out.h264")}
+
+	var stderr bytes.Buffer
+	if code := injectStream(&errReader{}, &flags, &stderr); code != exitError {
+		t.Fatalf("exit %d, want %d; stderr: %s", code, exitError, stderr.String())
+	}
+}
+
 func TestInjectRefusesMP4(t *testing.T) {
 	t.Parallel()
 
