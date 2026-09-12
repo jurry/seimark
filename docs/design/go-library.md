@@ -78,7 +78,7 @@ func AccessUnits(r io.Reader) iter.Seq2[[]byte, error]
 - **NAL units.** Annex B splitting uses mp4ff `avc.ExtractNalusFromByteStream`. Length-prefixed splitting is our own walker: a four-byte big-endian length, required to be at least 1 and no larger than the bytes left, otherwise an error naming the byte offset. mp4ff `avc.GetNalusFromSample` is not used because it panics on a corrupt length. Returned slices are subslices of `au`.
 - **Building a marker NAL unit.** `UserDataSEINAL(uuid [16]byte, body []byte) ([]byte, error)` wraps mp4ff `avc.CreateSEINalu` with one `user_data_unregistered` message. It exists in phase 1 for the fixture generator and the tests; the phase 2 writer builds on it. Verified against the worked example in `docs/format.md`: mp4ff produces the same 44 bytes.
 - **Markers.** For every NAL unit of type 6: drop the header byte, run mp4ff `sei.ExtractSEIData`, take messages of type 5, compare the first 16 payload bytes with `marker.FormatUUID()`, `marker.Decode` the rest. Foreign SEI and foreign unregistered UUIDs are skipped without error. An SEI NAL unit mp4ff cannot parse is skipped but not hidden: the scan finishes and returns the markers found together with an error wrapping the exported `ErrUnparsableSEI`, which callers can test with `errors.Is` and treat as advisory — the CLI warns on it and keeps going. A message with the seimark UUID that fails to decode ends the scan at once and returns the markers found so far with that error. The order of the result is the order in the access unit.
-- **Access units from a byte stream.** `AccessUnits` reads an Annex B stream incrementally through a `bufio.Reader`, finds start codes, and groups NAL units into access units with this rule: once the current access unit contains a VCL NAL unit (types 1 to 5), the next NAL unit starts a new access unit if it is an access-unit delimiter, SPS, PPS or SEI, or if it is a VCL NAL unit whose `first_mb_in_slice` is zero. One exception carries append placement: an SEI NAL unit that `Markers` finds a seimark marker in joins the current access unit instead of starting a new one, as long as that unit has no marker yet. The test on the single NAL unit is cheap because the unit is small. The limit is one append-placed marker per access unit; a second one starts the next unit. `first_mb_in_slice` is the first Exp-Golomb value after the header; it is zero exactly when the first bit of the byte after the header is 1, so the check is `nal[1] & 0x80 != 0`. Each yielded access unit is Annex B bytes with four-byte start codes, valid input for `Markers` with `FormatAnnexB`. A read error ends the sequence with that error; a final access unit without a trailing start code is yielded before the sequence ends. Leading bytes before the first start code are ignored.
+- **Access units from a byte stream.** `AccessUnits` reads an Annex B stream incrementally through a `bufio.Reader`, finds start codes, and groups NAL units into access units with the standard rule and no exception: once the current access unit contains a VCL NAL unit (types 1 to 5), the next NAL unit starts a new access unit if it is an access-unit delimiter, SPS, PPS or SEI, or if it is a VCL NAL unit whose `first_mb_in_slice` is zero. `first_mb_in_slice` is the first Exp-Golomb value after the header; it is zero exactly when the first bit of the byte after the header is 1, so the check is `nal[1] & 0x80 != 0`. Each yielded access unit is Annex B bytes with four-byte start codes, valid input for `Markers` with `FormatAnnexB`. A read error ends the sequence with that error; a final access unit without a trailing start code is yielded before the sequence ends. Leading bytes before the first start code are ignored.
 
 ## `mp4`
 
@@ -165,15 +165,8 @@ vectors/
 The writer is a library for live use first: a Go publisher or capture pipeline calls it once per frame with the clock reading of that frame. Offline stamping of files is the same call driven by `inject`.
 
 ```go
-type Placement int
-const (
-    PlacementBeforeVCL Placement = iota // after AUD, SPS, PPS and existing SEI, before the first VCL NAL unit
-    PlacementAppend                     // after the last NAL unit; for pipelines measured to need it
-)
-
 type WriterOptions struct {
     StreamID      [marker.StreamIDSize]byte // zero value: eight random bytes
-    Placement     Placement
     KeyframesOnly bool
     TimeSource    marker.TimeSource
 }
@@ -196,12 +189,12 @@ func StripMarkers(au []byte, f Format) ([]byte, error)
 - **Keyframes** are access units that contain an IDR NAL unit (type 5). With `KeyframesOnly`, other units are returned unchanged with `marked == false`.
 - **Already marked** units make `Mark` return `ErrAlreadyMarked` and leave the sequence untouched; the caller decides. `StripMarkers` removes every SEI NAL unit that carries a seimark marker and returns the unit rebuilt in its own format, which is how `inject` and the fixture generator get a clean starting point.
 - **Payload** above `marker.PayloadHardLimit` is an error and nothing is marked; above `marker.PayloadSoftLimit` the unit is marked and `ErrPayloadAboveSoftLimit` is returned alongside it, so a caller can log without losing the frame.
-- **Placement** follows `docs/format.md`. For `PlacementBeforeVCL` the marker goes after any AUD, SPS, PPS and existing SEI and before the first VCL NAL unit; a unit without a VCL NAL unit is an error.
+- **Placement** follows `docs/format.md` and has no options: the marker goes after any AUD, SPS, PPS and existing SEI and before the first VCL NAL unit; a unit without a VCL NAL unit is `ErrNoVCL`. ADR 0005.
 
 ## `seimark inject`
 
 ```
-seimark inject [-start RFC3339|now] [-fps N] [-stream-id HEX16] [-placement before-vcl|append] [-keyframes-only] IN OUT
+seimark inject [-start RFC3339|now] [-fps N] [-stream-id HEX16] [-keyframes-only] IN OUT
 ```
 
 - Annex B input only in this phase; an MP4 input is refused with exit code 2 and a message that MP4 comes later.
@@ -224,7 +217,7 @@ Text output for debugging, one block per access unit: the unit index and, when t
 
 ## Tests, phase 2
 
-- Writer: round trip of every marker vector through `Mark` and `Markers`; placement before VCL on units with and without parameter sets and with a foreign SEI; append placement; keyframes-only on the fixture yields two markers with sequences 0 and 1; `ErrAlreadyMarked`; soft and hard payload limits; length-prefixed input produces length-prefixed output; the output never aliases the input.
+- Writer: round trip of every marker vector through `Mark` and `Markers`; placement before VCL on units with and without parameter sets and with a foreign SEI; keyframes-only on the fixture yields two markers with sequences 0 and 1; `ErrAlreadyMarked`; soft and hard payload limits; length-prefixed input produces length-prefixed output; the output never aliases the input.
 - `StripMarkers`: fixture stripped has no markers and the same NAL units otherwise; stripping an unmarked unit is a no-op.
 - `inject`: the stripped fixture injected with the fixture's parameters equals the fixture; `-fps` overrides the SPS; a stream without VUI timing and without `-fps` exits 2; a marked input exits 1; `-keyframes-only` yields two markers.
 - `nals`: the fixture lists 20 units, each with one seimark SEI line; the first unit also shows the x264 user data as foreign.

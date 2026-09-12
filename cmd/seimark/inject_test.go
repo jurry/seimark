@@ -120,6 +120,53 @@ func TestInjectKeyframesOnly(t *testing.T) {
 	}
 }
 
+func TestInjectKeyframesOnlyReadsBackOnStandardRule(t *testing.T) {
+	t.Parallel()
+
+	in := strippedFixture(t)
+	out := filepath.Join(t.TempDir(), "marked.h264")
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"inject", "-start", "2026-09-12T21:00:00Z", "-keyframes-only", in, out}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var units int
+
+	for au, err := range h264.AccessUnits(bytes.NewReader(data)) {
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ms, err := h264.Markers(au, h264.FormatAnnexB)
+		if err != nil {
+			t.Fatalf("access unit %d: %v", units, err)
+		}
+
+		switch units {
+		case 0, 10:
+			if len(ms) != 1 || ms[0].Sequence != uint32(units/10) {
+				t.Fatalf("access unit %d: markers %v", units, ms)
+			}
+		default:
+			if len(ms) != 0 {
+				t.Fatalf("access unit %d carries %d markers", units, len(ms))
+			}
+		}
+
+		units++
+	}
+
+	if units != 20 {
+		t.Fatalf("%d access units, want 20", units)
+	}
+}
+
 func TestInjectRefusesMarkedInput(t *testing.T) {
 	t.Parallel()
 
@@ -180,9 +227,5 @@ func TestInjectUsageErrors(t *testing.T) {
 
 	if code := run([]string{"inject", "-stream-id", "zz", "a", "b"}, &stdout, &stderr); code != 2 {
 		t.Fatalf("bad stream id: exit %d", code)
-	}
-
-	if code := run([]string{"inject", "-placement", "middle", "a", "b"}, &stdout, &stderr); code != 2 {
-		t.Fatalf("bad placement: exit %d", code)
 	}
 }

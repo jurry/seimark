@@ -45,9 +45,9 @@ Big-endian throughout. Fixed part 22 bytes.
 
 ## Placement
 
-Writers insert the marker after any access-unit delimiter, parameter sets and existing SEI NAL units, and before the first VCL NAL unit (types 1 to 5) of the access unit. Appending after the last VCL NAL unit is a documented option for pipelines measured to need it. Readers accept either.
+Writers insert the marker after any access-unit delimiter, parameter sets and existing SEI NAL units, and before the first VCL NAL unit (types 1 to 5) of the access unit.
 
-A reader splitting an Annex B byte stream into access units follows the usual rule that an SEI NAL unit after a VCL NAL unit starts the next access unit, with one exception: a marker SEI is attached to the access unit it follows when that unit does not carry a marker yet. This is what makes append placement readable. It gives one append-placed marker per access unit; a second one is read as belonging to the next access unit. Prepend placement has no such limit.
+A reader of container-delimited input, such as MP4 samples, finds the marker anywhere in the sample. A reader of a raw Annex B byte stream applies the standard access-unit rule, under which an SEI NAL unit after a VCL NAL unit starts the next access unit, so a marker must precede the picture it belongs to.
 
 ## Compatibility with MISB ST 0604
 

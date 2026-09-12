@@ -17,11 +17,7 @@ import (
 	"github.com/jurry/seimark/marker"
 )
 
-const (
-	placementBeforeVCL = "before-vcl"
-	placementAppend    = "append"
-	startNow           = "now"
-)
+const startNow = "now"
 
 // streamIDHexLength is the stream id as -stream-id takes it: eight bytes of hex.
 const streamIDHexLength = 2 * marker.StreamIDSize
@@ -47,7 +43,6 @@ func parseInjectFlags(args []string, stderr io.Writer) (flags injectFlags, exitC
 	start := fs.String("start", startNow, "origin time of the first access unit: RFC 3339 or now")
 	fps := fs.Float64("fps", 0, "frame rate; without it the SPS VUI timing decides")
 	streamID := fs.String("stream-id", "", "stream id as 16 hex characters; without it eight random bytes")
-	placement := fs.String("placement", placementBeforeVCL, "marker placement: before-vcl or append")
 	keyframesOnly := fs.Bool("keyframes-only", false, "mark only access units with an IDR picture")
 
 	if err := fs.Parse(args); err != nil {
@@ -71,12 +66,6 @@ func parseInjectFlags(args []string, stderr io.Writer) (flags injectFlags, exitC
 
 	var err error
 	if flags.start, err = parseStart(*start); err != nil {
-		fmt.Fprintf(stderr, "seimark inject: %v\n", err)
-
-		return injectFlags{}, exitUsage, false
-	}
-
-	if flags.opts.Placement, err = parsePlacement(*placement); err != nil {
 		fmt.Fprintf(stderr, "seimark inject: %v\n", err)
 
 		return injectFlags{}, exitUsage, false
@@ -108,17 +97,6 @@ func parseStart(s string) (time.Time, error) {
 	}
 
 	return t.UTC(), nil
-}
-
-func parsePlacement(s string) (h264.Placement, error) {
-	switch s {
-	case placementBeforeVCL:
-		return h264.PlacementBeforeVCL, nil
-	case placementAppend:
-		return h264.PlacementAppend, nil
-	}
-
-	return 0, fmt.Errorf("-placement must be %s or %s, got %q", placementBeforeVCL, placementAppend, s)
 }
 
 // parseStreamID returns the zero id for an empty flag, which makes the writer

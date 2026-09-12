@@ -99,21 +99,6 @@ func TestMarkGoesAfterExistingSEI(t *testing.T) {
 	}
 }
 
-func TestMarkAppend(t *testing.T) {
-	t.Parallel()
-
-	w := newTestWriter(t, WriterOptions{Placement: PlacementAppend})
-
-	out, _, err := w.Mark(annexB(sps, pps, idr), FormatAnnexB, t0, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got, want := naluTypes(t, out, FormatAnnexB), []int{7, 8, 5, 6}; !equalInts(got, want) {
-		t.Fatalf("NAL types %v, want %v", got, want)
-	}
-}
-
 func TestMarkLengthPrefixedStaysLengthPrefixed(t *testing.T) {
 	t.Parallel()
 

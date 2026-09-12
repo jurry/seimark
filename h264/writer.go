@@ -13,18 +13,6 @@ import (
 	"github.com/jurry/seimark/marker"
 )
 
-// Placement says where in the access unit the marker NAL unit goes.
-type Placement int
-
-// PlacementBeforeVCL puts the marker after any delimiter, parameter sets and
-// existing SEI, before the first VCL NAL unit; it is what docs/format.md asks for.
-// PlacementAppend puts the marker after the last NAL unit, for pipelines
-// measured to need it.
-const (
-	PlacementBeforeVCL Placement = iota
-	PlacementAppend
-)
-
 // ErrAlreadyMarked reports an access unit that already carries a seimark
 // marker; the unit is left alone and the sequence does not advance.
 var ErrAlreadyMarked = errors.New("seimark: access unit already carries a marker")
@@ -33,15 +21,14 @@ var ErrAlreadyMarked = errors.New("seimark: access unit already carries a marker
 // advisory: the unit was marked and is returned with it.
 var ErrPayloadAboveSoftLimit = errors.New("seimark: payload above the soft limit")
 
-// ErrNoVCL reports an access unit with no VCL NAL unit, which has no place for a
-// before-VCL marker.
+// ErrNoVCL reports an access unit with no VCL NAL unit, which has no place for
+// the marker.
 var ErrNoVCL = errors.New("seimark: access unit has no VCL NAL unit")
 
 // WriterOptions configures a Writer. The zero value means a random stream id,
-// placement before the first VCL NAL unit, every access unit marked, and time of sending.
+// every access unit marked, and time of sending.
 type WriterOptions struct {
 	StreamID      [marker.StreamIDSize]byte
-	Placement     Placement
 	KeyframesOnly bool
 	TimeSource    marker.TimeSource
 }
@@ -106,7 +93,7 @@ func (w *Writer) Mark(au []byte, f Format, at time.Time, payload []byte) (out []
 		return nil, false, err
 	}
 
-	pos, err := w.insertIndex(nalus)
+	pos, err := insertIndex(nalus)
 	if err != nil {
 		return nil, false, err
 	}
@@ -141,12 +128,9 @@ func (w *Writer) markerNAL(at time.Time, payload []byte) ([]byte, error) {
 	return UserDataSEINAL(marker.FormatUUID(), body)
 }
 
-// insertIndex is where the marker NAL unit goes among nalus.
-func (w *Writer) insertIndex(nalus [][]byte) (int, error) {
-	if w.opts.Placement == PlacementAppend {
-		return len(nalus), nil
-	}
-
+// insertIndex is where the marker NAL unit goes among nalus: after any
+// delimiter, parameter sets and existing SEI, before the first VCL NAL unit.
+func insertIndex(nalus [][]byte) (int, error) {
 	for i, nal := range nalus {
 		if avc.IsVideoNaluType(avc.GetNaluType(nal[0])) {
 			return i, nil
