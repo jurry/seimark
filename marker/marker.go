@@ -139,7 +139,7 @@ func IsFormatUUID(uuid []byte) bool {
 }
 
 // Encode returns the marker body. The payload flag is set when Payload is non-nil.
-// OriginTime is rounded to microseconds.
+// OriginTime is truncated to microseconds.
 func (m Marker) Encode() ([]byte, error) {
 	if len(m.Payload) > PayloadHardLimit {
 		return nil, fmt.Errorf("%w: %d", ErrPayloadTooLarge, len(m.Payload))

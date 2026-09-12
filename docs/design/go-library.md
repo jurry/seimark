@@ -1,6 +1,6 @@
 # Design: Go library and CLI
 
-**Type:** LIVING. Describes the Go side: phase 1 (reader and `dump`, shipped) and phase 2 (writer, `inject`, `nals`, approved 2026-09-12). Rewritten as later phases change it.
+**Type:** LIVING. Describes the Go side: phase 1 (reader and `dump`, shipped) and phase 2 (writer, `inject`, `nals`, done). Rewritten as later phases change it.
 
 ## Shape
 
@@ -51,7 +51,7 @@ func IsFormatUUID(uuid []byte) bool
 
 - `Decode` reads exactly the layout in `docs/format.md`. Reserved flag bits are ignored. Trailing bytes after the body are ignored, so a future minor addition does not break version 1 readers.
 - `Encode` returns the body only. The payload flag is set when `Payload != nil`. Payload length above `PayloadHardLimit` is `ErrPayloadTooLarge`; the soft limit is the writer's concern, not the codec's.
-- `OriginTime` is stored as microseconds since the Unix epoch; `Encode` rounds to microseconds, so `Decode(Encode(m))` equals `m` only after that rounding, which the tests state explicitly.
+- `OriginTime` is stored as microseconds since the Unix epoch; `Encode` truncates to microseconds, so `Decode(Encode(m))` equals `m` only after that truncation, which the tests state explicitly.
 
 ## `h264`
 
@@ -164,7 +164,7 @@ vectors/
 
 ## Tests
 
-- `marker`: table-driven codec tests including every negative vector; round trip after microsecond rounding.
+- `marker`: table-driven codec tests including every negative vector; round trip after microsecond truncation.
 - `h264`: format detection; NAL splitting in both formats including an overrunning length; `Markers` with foreign SEI before and after a marker, with two markers, with a malformed marker; `AccessUnits` on streams with and without delimiters, with SPS and PPS before an IDR, with a marker before the first VCL NAL unit, and on a stream ending without a trailing start code.
 - `mp4`: sample count, DTS, PTS and sync on the progressive and fragmented fixtures; `ErrNoVideoTrack` on an audio-only file built in the test.
 - Golden: every vector file decoded and compared; `seimark dump` output on every stream fixture compared with its `.jsonl`.
@@ -194,7 +194,7 @@ var ErrPayloadAboveSoftLimit error // advisory: the unit was marked
 func StripMarkers(au []byte, f Format) ([]byte, error)
 ```
 
-- **`Mark`** returns a new access unit in the same format as its input: Annex B with four-byte start codes, or four-byte length prefixes. It never aliases the input. The marker body carries `at` rounded to microseconds, the writer's stream id, the next sequence number and the payload; `TimeSource` from the options goes into the flags.
+- **`Mark`** returns a new access unit in the same format as its input: Annex B with four-byte start codes, or four-byte length prefixes. It never aliases the input. The marker body carries `at` truncated to microseconds, the writer's stream id, the next sequence number and the payload; `TimeSource` from the options goes into the flags.
 - **Sequence** starts at 0 and increments once per marked unit, wrapping modulo 2^32, as the format says. Units left unmarked by `KeyframesOnly` do not consume a number.
 - **Keyframes** are access units that contain an IDR NAL unit (type 5). With `KeyframesOnly`, other units are returned unchanged with `marked == false`.
 - **Already marked** units make `Mark` return `ErrAlreadyMarked` and leave the sequence untouched; the caller decides. `StripMarkers` removes every SEI NAL unit that carries a seimark marker and returns the unit rebuilt in its own format, which is how `inject` and the fixture generator get a clean starting point.
@@ -228,10 +228,13 @@ Text output for debugging, one block per access unit: the unit index and, when t
 
 ## Tests, phase 2
 
-- Writer: round trip of every marker vector through `Mark` and `Markers`; placement before VCL on units with and without parameter sets and with a foreign SEI; keyframes-only on the fixture yields two markers with sequences 0 and 1; `ErrAlreadyMarked`; soft and hard payload limits; length-prefixed input produces length-prefixed output; the output never aliases the input.
-- `StripMarkers`: fixture stripped has no markers and the same NAL units otherwise; stripping an unmarked unit is a no-op.
-- `inject`: the stripped fixture injected with the fixture's parameters equals the fixture; `-fps` overrides the SPS; a stream without VUI timing and without `-fps` exits 2; a marked input exits 1; `-keyframes-only` yields two markers.
-- `nals`: the fixture lists 20 units, each with one seimark SEI line; the first unit also shows the x264 user data as foreign.
+- Writer: placement before VCL on a unit with parameter sets, and after an existing foreign SEI; a unit with no VCL NAL unit is `ErrNoVCL`; keyframes-only marks the IDR unit and leaves the other unchanged; `ErrAlreadyMarked` leaves the sequence untouched; soft and hard payload limits; length-prefixed input produces length-prefixed output; the output never aliases the input; empty NAL units are skipped without a panic; the marker NAL unit reproduces the worked example; capture time source at sequence 7 reproduces marker vector 006; the time is truncated to microseconds; `NewWriter` draws a different random stream id each time.
+- `StripMarkers`: only marker SEI NAL units are removed; stripping an unmarked unit is a no-op; length-prefixed input; strip then mark again returns the same bytes; empty NAL units are skipped.
+- Fixture: the committed Annex B fixture is exactly what the writer produces from its own stripped NAL units with the generator's parameters.
+- `AccessUnits`: the standard rule with no marker exception — an SEI NAL unit after the last VCL NAL unit starts the next access unit; the `[SPS PPS IDR][nonIDR][IDR]` shape with only the IDR units marked reads back with the markers on units 0 and 2.
+- `inject`: the stripped fixture injected with the fixture's parameters gives 20 records with the right times and sequences; `-fps` overrides the SPS; `-keyframes-only` gives two markers and reads back on the standard rule; a unit without a picture is written unchanged and reported, with `marked 0 of 1 access units`; the fixture reports `marked 20 of 20`, keyframes-only `marked 2 of 20`; `OUT` equal to `IN` exits 2 and leaves the input untouched; a stream without VUI timing and without `-fps` exits 2; `-fps NaN`, `Inf`, `0` and `-1` exit 2; `rateFromSPSValue` on a constructed SPS without usable timing is `errNoRate`; a read error during the rate probe exits 1; a marked input exits 1; MP4 input exits 2; the zero stream id exits 2.
+- `h264.SEIMessages`: the spec example NAL unit gives one message with a decoded marker; a foreign user-data NAL unit gives one message with a UUID and no marker; a one-byte NAL unit is `ErrUnparsableSEI`.
+- `nals`: the fixture lists 20 units, each with one seimark SEI line, and shows the x264 user data as foreign; the MP4 fixture the same with DTS and PTS; a one-byte SEI NAL unit prints `unparsable` and `dump` agrees that there is no marker.
 
 ## Later phases
 

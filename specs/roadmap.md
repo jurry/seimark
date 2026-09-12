@@ -22,8 +22,8 @@ Design in `docs/design/go-library.md` before implementation.
 
 ## Phase 2 — Go writer and `inject`. Done
 
-- Stateful writer: stream identity, sequence counter, time source, placement before the first VCL NAL unit with append as an option, keyframes-only mode, soft cap on the application payload.
-- CLI `seimark inject` for Annex B streams: stamp every access unit from a start time and interval, or from container timestamps.
+- Stateful writer: stream identity, sequence counter, time source, placement before the first VCL NAL unit, keyframes-only mode, soft cap on the application payload.
+- CLI `seimark inject` for Annex B streams: stamp every access unit from a start time and interval.
 - CLI `seimark nals`: list NAL units per access unit, for debugging.
 - Vectors extended with writer round trips; every vector must survive decode after encode.
 
