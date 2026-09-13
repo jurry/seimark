@@ -12,7 +12,10 @@
 | Tests | Standard library `testing`, golden files in `vectors/` | The vectors are the format's conformance suite and are shared with the browser package. |
 | Lint | golangci-lint v2, every linter on, each disabled one justified in .golangci.yaml; gofumpt and gci as formatters | Findings are read, not silenced; new linters are on until argued off. |
 | Language, browser | TypeScript | Type checking across the codec and the transform; ships as an npm package. |
-| Browser API | WebRTC Encoded Transform: `RTCRtpScriptTransform` in a worker, with `createEncodedStreams` as the fallback where the standard API is missing | Standard first; the fallback covers older Chromium. Details decided in the phase 3 design. |
+| Browser API | WebRTC Encoded Transform: `RTCRtpScriptTransform` in a worker, with `createEncodedStreams` as the fallback where the standard API is missing | Standard first. Measured 2026-09-13: Chromium 153 and Firefox 155 both expose the standard API, so the fallback covers only browsers older than those and has no coverage in the browser test matrix (ADR 0006, `docs/design/browser-package.md`). |
+| Tests, browser package | Standard library `node:test` and `node:assert`, reading `../vectors/` | The tech stack forbids third-party assertion frameworks and the Go side uses standard library `testing` for the same reason; the vectors are shared, so both implementations are held to the same bytes. |
+| Browser build | `esbuild` (MIT), development dependency only | The `RTCRtpScriptTransform` worker is created from a blob URL and a blob worker cannot import at runtime, so the compiled codec has to be emitted into the worker's source as a string constant (ADR 0006). Nothing ships in the package. |
+| Browser end-to-end tests | `@playwright/test` (Apache-2.0), development dependency only | The only way to prove the real encoded-transform paths work against a real H.264 encoder. Chromium in CI; see the design for why Firefox is not. |
 | Format identity | One fixed UUID, see `docs/format.md` | Readers ignore unregistered SEI with any other UUID, so foreign metadata never confuses them. |
 | Licence | MIT | Maximum adoption for a small library; matches mp4ff. |
 
