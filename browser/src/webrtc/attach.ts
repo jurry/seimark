@@ -61,24 +61,24 @@ export function attach(sender: RTCRtpSender, opts: AttachOptions = {}): SeimarkH
 
   if (ctor === undefined && streamsOf === undefined) {
     throw new SeimarkError(
-      'truncated',
+      'unsupported_browser',
       'this browser has no WebRTC encoded transform support',
     );
   }
 
   if (opts.streamId !== undefined && opts.streamId.length !== STREAM_ID_SIZE) {
     throw new SeimarkError(
-      'truncated',
+      'invalid_argument',
       `stream id is ${opts.streamId.length} bytes, needs ${STREAM_ID_SIZE}`,
     );
   }
 
   if (sender.track === null) {
-    throw new SeimarkError('no_vcl', 'sender has no track');
+    throw new SeimarkError('invalid_argument', 'sender has no track');
   }
 
   if (attached.has(sender)) {
-    throw new SeimarkError('already_marked', 'sender is already attached');
+    throw new SeimarkError('already_attached', 'sender is already attached');
   }
 
   const keyframesOnly = opts.keyframesOnly ?? false;

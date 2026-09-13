@@ -1,3 +1,4 @@
+import { SeimarkError } from '../errors.ts';
 import { type Marker } from '../marker.ts';
 import { markersIn } from '../scan.ts';
 import { buildWorker, scriptTransformCtor } from './worker.ts';
@@ -149,7 +150,10 @@ export function reader(
   ).createEncodedStreams;
 
   if (streams === undefined) {
-    throw new Error('this browser has no WebRTC encoded transform support');
+    throw new SeimarkError(
+      'unsupported_browser',
+      'this browser has no WebRTC encoded transform support',
+    );
   }
 
   const { readable, writable } = streams.call(receiver);

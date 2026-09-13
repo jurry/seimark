@@ -1,3 +1,4 @@
+import { SeimarkError } from '../errors.ts';
 import { WORKER_SOURCE } from './worker-source.ts';
 
 export interface ScriptTransformCtor {
@@ -18,7 +19,8 @@ export function buildWorker(): Worker {
   try {
     return new Worker(url, { type: 'module' });
   } catch (e) {
-    throw new Error(
+    throw new SeimarkError(
+      'csp_blocked',
       `the page content security policy blocks the seimark worker; allow worker-src blob: (${String(e)})`,
     );
   } finally {

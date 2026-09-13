@@ -31,6 +31,7 @@ export class FrameHandler {
   private payload: Uint8Array | null = null;
   private timeSource: TimeSource = 'send';
   private probed = false;
+  private warned = false;
 
   private writer: Writer;
   private readonly opts: HandlerOptions;
@@ -108,8 +109,20 @@ export class FrameHandler {
         };
         this.stats.framesMarked++;
       }
-    } catch {
+    } catch (e) {
       this.stats.errors++;
+      if (!this.warned) {
+        this.warned = true;
+        const code = e instanceof SeimarkError ? e.code : 'unparsable_sei';
+        const message = e instanceof Error ? e.message : String(e);
+        // onWarn is a page callback; it must not be able to throw back into the
+        // encoded transform, or a single misbehaving page handler would end the call.
+        try {
+          this.opts.onWarn(code, message, this.stats.framesSeen);
+        } catch {
+          // Swallowed deliberately: see comment above.
+        }
+      }
     }
   }
 }

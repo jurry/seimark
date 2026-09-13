@@ -75,7 +75,33 @@ test('a frame that cannot be marked passes through and is counted', () => {
   h.handle(f);
   assert.deepEqual(new Uint8Array(f.data), before);
   assert.equal(h.stats.errors, 1);
-  assert.equal(warnings.length, 0);
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0]?.[0], 'no_vcl');
+});
+
+test('an unmarkable frame warns only on the first occurrence', () => {
+  const { h, warnings } = handler();
+  h.handle(frame(annexb(Uint8Array.of(0x67, 0x11))));
+  h.handle(frame(annexb(Uint8Array.of(0x67, 0x11))));
+  h.handle(frame(annexb(Uint8Array.of(0x67, 0x11))));
+  assert.equal(h.stats.errors, 3);
+  assert.equal(warnings.length, 1);
+});
+
+test('a page onWarn callback that throws does not stop handling', () => {
+  const h = new FrameHandler({
+    writer: new Writer({ streamId: ID }),
+    keyframesOnly: false,
+    nowUs: () => 1789246800000000n,
+    captureUs: (t) => BigInt(Math.round(t * 1000)),
+    onWarn: () => {
+      throw new Error('page bug');
+    },
+  });
+  assert.doesNotThrow(() => {
+    h.handle(frame(annexb(Uint8Array.of(0x67, 0x11))));
+  });
+  assert.equal(h.stats.errors, 1);
 });
 
 test('an empty frame type passes through without an error', () => {

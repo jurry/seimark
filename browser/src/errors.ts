@@ -5,7 +5,11 @@ export type SeimarkErrorCode =
   | 'payload_above_soft_limit'
   | 'unparsable_sei'
   | 'no_vcl'
-  | 'already_marked';
+  | 'already_marked'
+  | 'unsupported_browser'
+  | 'invalid_argument'
+  | 'already_attached'
+  | 'csp_blocked';
 
 export class SeimarkError extends Error {
   readonly code: SeimarkErrorCode;

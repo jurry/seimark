@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { trackSequence } from '../src/webrtc/reader.ts';
+import { trackSequence, reader } from '../src/webrtc/reader.ts';
+import { SeimarkError } from '../src/errors.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -54,4 +55,16 @@ test('a duplicate does not move the expected sequence forward', () => {
   trackSequence(state, 'aa', 5);
   trackSequence(state, 'aa', 3);
   assert.deepEqual(trackSequence(state, 'aa', 6), { gap: false, duplicate: false });
+});
+
+test('reader() throws SeimarkError with code unsupported_browser outside a browser', () => {
+  const fakeReceiver = {} as RTCRtpReceiver;
+  let caught: unknown;
+  try {
+    reader(fakeReceiver, () => {});
+  } catch (e) {
+    caught = e;
+  }
+  assert.ok(caught instanceof SeimarkError);
+  assert.equal((caught as SeimarkError).code, 'unsupported_browser');
 });
