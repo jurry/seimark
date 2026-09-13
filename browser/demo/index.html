@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>seimark WHIP publisher</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 14px/1.5 system-ui, sans-serif;
+    margin: 0 auto;
+    max-width: 60rem;
+    padding: 1.5rem 1rem;
+  }
+  h1 { font-size: 1.3rem; margin: 0 0 .25rem; }
+  p.lede { margin: 0 0 1.5rem; opacity: .75; }
+  .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: 1rem; }
+  label { font-weight: 600; }
+  input[type=url], input[type=text] {
+    flex: 1 1 20rem;
+    font: inherit;
+    padding: .4rem .5rem;
+    border: 1px solid currentColor;
+    border-radius: .25rem;
+    background: transparent;
+    color: inherit;
+  }
+  button { font: inherit; padding: .4rem .9rem; border-radius: .25rem; cursor: pointer; }
+  button[disabled] { opacity: .5; cursor: default; }
+  .panes { display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: flex-start; }
+  canvas { border: 1px solid currentColor; border-radius: .25rem; }
+  table { border-collapse: collapse; min-width: 22rem; }
+  th, td { text-align: left; padding: .25rem .75rem .25rem 0; vertical-align: top; }
+  th { font-weight: 600; opacity: .7; white-space: nowrap; }
+  td { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+  #status { min-height: 1.5em; margin-top: 1rem; }
+  #status.bad { color: #c0392b; }
+</style>
+</head>
+<body>
+
+<h1>seimark WHIP publisher</h1>
+<p class="lede">
+  Publishes a generated canvas over WHIP, stamps every access unit with a seimark
+  marker on the sender, and shows what the page can read back from the handle.
+  No camera and no dependencies.
+</p>
+
+<div class="row">
+  <label for="whip">WHIP endpoint</label>
+  <input id="whip" type="url" placeholder="https://example.org/whip/live" autocomplete="off">
+</div>
+
+<div class="row">
+  <label for="token">Bearer token</label>
+  <input id="token" type="text" placeholder="optional" autocomplete="off">
+</div>
+
+<div class="row">
+  <label for="payload">Payload</label>
+  <input id="payload" type="text" placeholder="stamped into every marked frame" autocomplete="off">
+  <button id="send-payload" type="button" disabled>Set</button>
+</div>
+
+<div class="row">
+  <button id="start" type="button">Publish</button>
+  <button id="stop" type="button" disabled>Stop</button>
+</div>
+
+<div class="panes">
+  <canvas id="source" width="320" height="240"></canvas>
+  <table>
+    <tbody>
+      <tr><th>stream id</th><td id="stream-id">&mdash;</td></tr>
+      <tr><th>sequence</th><td id="sequence">&mdash;</td></tr>
+      <tr><th>time source</th><td id="time-source">&mdash;</td></tr>
+      <tr><th>origin time</th><td id="origin">&mdash;</td></tr>
+      <tr><th>last marker payload</th><td id="marker-payload">&mdash;</td></tr>
+      <tr><th>frames seen / marked</th><td id="frames">&mdash;</td></tr>
+      <tr><th>errors</th><td id="errors">0</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<p id="status"></p>
+
+<script type="module">
+import { attach } from '../dist/webrtc/index.js';
+
+const els = {
+  whip: document.getElementById('whip'),
+  token: document.getElementById('token'),
+  payload: document.getElementById('payload'),
+  sendPayload: document.getElementById('send-payload'),
+  start: document.getElementById('start'),
+  stop: document.getElementById('stop'),
+  canvas: document.getElementById('source'),
+  streamId: document.getElementById('stream-id'),
+  sequence: document.getElementById('sequence'),
+  timeSource: document.getElementById('time-source'),
+  origin: document.getElementById('origin'),
+  markerPayload: document.getElementById('marker-payload'),
+  frames: document.getElementById('frames'),
+  errors: document.getElementById('errors'),
+  status: document.getElementById('status'),
+};
+
+const FPS = 30;
+const session = {
+  pc: null,
+  handle: null,
+  painter: null,
+  poller: null,
+  track: null,
+  resource: null,
+  errors: 0,
+};
+
+function say(text, bad = false) {
+  els.status.textContent = text;
+  els.status.classList.toggle('bad', bad);
+}
+
+function hex(bytes) {
+  let out = '';
+  for (const b of bytes) out += b.toString(16).padStart(2, '0');
+  return out;
+}
+
+function paint(canvas) {
+  const ctx = canvas.getContext('2d');
+  let n = 0;
+  return setInterval(() => {
+    n++;
+    ctx.fillStyle = `hsl(${(n * 4) % 360} 60% 45%)`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#fff';
+    ctx.font = '56px ui-monospace, monospace';
+    ctx.fillText(String(n).padStart(5, '0'), 24, canvas.height / 2 + 20);
+    ctx.font = '18px ui-monospace, monospace';
+    ctx.fillText(new Date().toISOString().slice(11, 23), 24, canvas.height - 32);
+  }, Math.round(1000 / FPS));
+}
+
+function preferH264(transceiver) {
+  const codecs = RTCRtpSender.getCapabilities('video').codecs.filter(
+    (c) => c.mimeType.toLowerCase() === 'video/h264',
+  );
+  if (codecs.length === 0) {
+    throw new Error('this browser offers no H.264 send codec; seimark marks H.264 only');
+  }
+  transceiver.setCodecPreferences(codecs);
+}
+
+/** WHIP: POST the offer as application/sdp, take the answer from the 201 body. */
+async function whipPublish(endpoint, token, offerSdp) {
+  const headers = { 'Content-Type': 'application/sdp' };
+  if (token !== '') headers.Authorization = `Bearer ${token}`;
+
+  const response = await fetch(endpoint, { method: 'POST', headers, body: offerSdp });
+  if (response.status !== 201) {
+    throw new Error(`WHIP endpoint answered ${response.status} ${response.statusText}`);
+  }
+
+  const location = response.headers.get('Location');
+  return {
+    answer: await response.text(),
+    resource: location === null ? null : new URL(location, response.url).toString(),
+  };
+}
+
+async function whipDelete(resource, token) {
+  if (resource === null) return;
+  const headers = {};
+  if (token !== '') headers.Authorization = `Bearer ${token}`;
+  await fetch(resource, { method: 'DELETE', headers }).catch(() => undefined);
+}
+
+function render() {
+  const handle = session.handle;
+  if (handle === null) return;
+
+  const marker = handle.lastMarker;
+  const stats = handle.stats;
+
+  els.streamId.textContent = hex(handle.streamId);
+  els.timeSource.textContent = handle.timeSource;
+  els.frames.textContent = `${stats.framesSeen} / ${stats.framesMarked}`;
+
+  if (marker === null) {
+    els.sequence.textContent = 'waiting for the first frame';
+    return;
+  }
+
+  els.sequence.textContent = String(marker.sequence);
+  els.origin.textContent = `${marker.originTimeUs} us (${
+    new Date(Number(marker.originTimeUs / 1000n)).toISOString()
+  })`;
+  els.markerPayload.textContent =
+    marker.payload === null ? '(none)' : new TextDecoder().decode(marker.payload);
+}
+
+async function start() {
+  const endpoint = els.whip.value.trim();
+  if (endpoint === '') {
+    say('Enter a WHIP endpoint first.', true);
+    return;
+  }
+
+  els.start.disabled = true;
+  session.errors = 0;
+  els.errors.textContent = '0';
+  say('Connecting…');
+
+  try {
+    session.painter = paint(els.canvas);
+    const stream = els.canvas.captureStream(FPS);
+    session.track = stream.getVideoTracks()[0];
+
+    session.pc = new RTCPeerConnection({ iceServers: [] });
+    const sender = session.pc.addTrack(session.track, stream);
+    preferH264(session.pc.getTransceivers().find((t) => t.sender === sender));
+
+    // The transform must be installed before the frames it marks exist:
+    // attaching after negotiation gives a working call with nothing marked.
+    session.handle = attach(sender, {
+      onError: (code, message, frames) => {
+        session.errors++;
+        els.errors.textContent = `${session.errors} (last: ${code} at frame ${frames})`;
+        console.warn('seimark', code, message);
+      },
+    });
+
+    els.sendPayload.disabled = false;
+    session.poller = setInterval(render, 200);
+    render();
+
+    const offer = await session.pc.createOffer();
+    await session.pc.setLocalDescription(offer);
+
+    const { answer, resource } = await whipPublish(
+      endpoint,
+      els.token.value.trim(),
+      session.pc.localDescription.sdp,
+    );
+    session.resource = resource;
+    await session.pc.setRemoteDescription({ type: 'answer', sdp: answer });
+
+    els.stop.disabled = false;
+    say('Publishing.');
+  } catch (e) {
+    say(String(e), true);
+    await stop();
+  }
+}
+
+async function stop() {
+  clearInterval(session.painter);
+  clearInterval(session.poller);
+  session.handle?.detach();
+  session.pc?.close();
+  session.track?.stop();
+  await whipDelete(session.resource, els.token.value.trim());
+
+  session.handle = null;
+  session.pc = null;
+  session.track = null;
+  session.resource = null;
+
+  els.start.disabled = false;
+  els.stop.disabled = true;
+  els.sendPayload.disabled = true;
+  if (!els.status.classList.contains('bad')) say('Stopped.');
+}
+
+els.start.addEventListener('click', () => void start());
+els.stop.addEventListener('click', () => void stop());
+els.sendPayload.addEventListener('click', () => {
+  const text = els.payload.value;
+  session.handle?.setPayload(text === '' ? null : new TextEncoder().encode(text));
+  say(text === '' ? 'Payload cleared.' : `Payload set to ${text.length} bytes.`);
+});
+</script>
+
+</body>
+</html>

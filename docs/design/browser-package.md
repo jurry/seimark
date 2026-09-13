@@ -1,6 +1,6 @@
 # Design: browser package
 
-**Type:** LIVING. Describes the TypeScript side: phase 3, the marker codec, the writer and reader, the WebRTC Encoded Transform integration and the demo page. Rewritten as later phases change it.
+**Type:** LIVING. Describes the TypeScript side as built in phase 3: the marker codec, the writer and reader, the WebRTC Encoded Transform integration, the demo page and what the browser measurements showed. Rewritten as later phases change it.
 
 ## Shape
 
@@ -11,7 +11,9 @@ One npm package, `seimark`, in `browser/` of this repository. Two entry points b
 | `seimark` | The marker body codec from `docs/format.md`, the SEI container, the NAL unit walk and insert in both framings, `Writer`, `markersIn`. | `es2022`, no DOM | nothing |
 | `seimark/webrtc` | `attach`, the `RTCRtpScriptTransform` worker, the `createEncodedStreams` fallback, the time source probe. | `es2022` and DOM | `seimark` |
 
-ESM only. Core has no runtime dependencies; the development dependencies are TypeScript, esbuild and Playwright. Tests run on `node:test`, because the tech stack forbids third-party assertion frameworks. These three additions belong in `specs/tech-stack.md`, which this phase updates.
+ESM only. Core has no runtime dependencies; the development dependencies are TypeScript, esbuild and Playwright. Tests run on `node:test`, because the tech stack forbids third-party assertion frameworks. `specs/tech-stack.md` carries all three in its approved table.
+
+`browser/README.md` is the package's own document: the two entry points, a usage example for each, and the limitations measured in this phase. `browser/demo/index.html` is the WHIP publisher described below.
 
 The package stays in this repository because `vectors/` is the conformance suite for every implementation of the format and the Go and TypeScript sides must be checked against the same files. Tests read `../vectors/` directly; the published tarball does not carry them.
 
@@ -55,7 +57,12 @@ export type SeimarkErrorCode =
   | 'payload_above_soft_limit'
   | 'unparsable_sei'
   | 'no_vcl'
-  | 'already_marked';
+  | 'already_marked'
+  // Raised only by seimark/webrtc; the union lives here so one `code` switch covers both.
+  | 'unsupported_browser'
+  | 'invalid_argument'
+  | 'already_attached'
+  | 'csp_blocked';
 
 export function decodeMarker(body: Uint8Array): Marker;
 export function encodeMarker(m: Marker): Uint8Array;
@@ -106,7 +113,7 @@ The names mirror `marker` and `h264` in the Go library so that a reader of one f
 
 `decodeMarker` reads the layout in `docs/format.md` exactly. Reserved flag bits are ignored. Trailing bytes after the body are ignored, so a future minor addition does not break a version 1 reader. A version other than 1 is `unsupported_version`; a body shorter than its fields require, including a payload length that overruns the body, is `truncated`.
 
-`encodeMarker` returns the body only. The payload flag is set when `payload` is not null; a non-null empty payload is written as a payload of length zero, which is how the Go encoder behaves. No current vector covers that case: `004` is a truncated error case and `006` carries a five-byte payload. A vector for the empty payload is added in this phase, since the rule is otherwise pinned down by nothing and the two implementations could drift.
+`encodeMarker` returns the body only. The payload flag is set when `payload` is not null; a non-null empty payload is written as a payload of length zero, which is how the Go encoder behaves. Neither `004`, a truncated error case, nor `006`, which carries a five-byte payload, covers it, so `vectors/markers/008-empty-payload` was added for it: without a vector the rule is pinned down by nothing and the two implementations could drift.
 
 A payload longer than `PAYLOAD_HARD_LIMIT` is `payload_too_large`. The soft limit is the writer's concern, not the codec's.
 
@@ -175,7 +182,7 @@ The transform layer collapses this into never-throw: it catches the throwing kin
 
 ### Reading and stripping
 
-`markersIn` is the read path and it is a function, not a class. The earlier draft had a `Reader` class; it held no state and was `markersIn` with a `this`.
+`markersIn` is the read path and it is a function, not a class. A `Reader` class was considered and dropped; it held no state and was `markersIn` with a `this`.
 
 The receive-side state a subscriber actually wants is gap and duplicate detection, which is per stream id and not per access unit, so it lives in the transform layer where the stream exists, not in the codec. `reader()` keeps expected-next-sequence per stream id and reports gaps, which is also what the smoke test's continuity assertion needs.
 
@@ -238,13 +245,24 @@ A payload above the soft limit is reported once through `onError` when it is set
 
 ### Choosing the API
 
-`RTCRtpScriptTransform` where the constructor exists, `createEncodedStreams` otherwise. Both are current: the standard API is baseline since 2025, shipped by Safari from 15.4 and Firefox from 117, while Chrome still ships the older, non-standards-track `createEncodedStreams`. The fallback is therefore not a legacy shim for old browsers, it is the path Chrome takes today, and it carries the same test weight as the standard one.
+`RTCRtpScriptTransform` where the constructor exists, `createEncodedStreams` otherwise.
+
+The plan for this phase assumed Chrome still shipped only the older, non-standards-track `createEncodedStreams`, and that the fallback would therefore be the path Chrome took every day. That is no longer true. Measured on 2026-09-13 with the Playwright browser builds this repository tests against:
+
+| Browser | `RTCRtpScriptTransform` | `createEncodedStreams` |
+|---|---|---|
+| Chromium 153 | yes | yes |
+| Firefox 155 | yes | no |
+
+Since `attach` prefers the standard API, both browsers take it. **The `createEncodedStreams` fallback has no browser coverage.** It is exercised only through `FrameHandler`, the frame-handling function both paths share, which the Node tests drive directly with a fake frame. That covers the marking logic and none of the plumbing that is specific to the fallback: the `createEncodedStreams` call itself, the `pipeThrough`/`pipeTo` chain, and the pass-through form of `detach`. The fallback is kept because it is the only path in Chromium versions older than the standard API's arrival there, but it is now a compatibility shim and the design no longer claims it carries equal test weight.
 
 The difference the package hides: the standard API runs the transform in a worker and is constructed with one, the fallback returns a readable and a writable on the main thread. The same writer code runs in both, which is why `Writer` takes its clock and its keyframe flag as inputs rather than reaching for them.
 
 The frame-handling function is exported from its own module and takes a frame-like object, a `Writer` and a clock. Both paths call it, and the Node tests call it directly, so the logic is tested without a worker and without `onrtctransform` wiring.
 
-`attach` throws synchronously, before any frame flows, for conditions settled up front: no encoded transform in the browser, a stream id whose length is not 8, a sender with no track, a sender already attached, and a blob worker that the page's content security policy refuses. The last one is a real deployment failure — a policy without `worker-src blob:` blocks the worker the package builds — so it is detected at attach and reported as a policy error naming the directive, not left as a silent stream that never marks.
+**`attach` must be called before the frames it is to mark exist.** A transform installed on a sender that is already negotiated and sending sees `framesSeen: 0` on a call that is visibly working: the frames that already exist are never routed through it. In practice this means attaching after `addTrack` and before `setLocalDescription`. Nothing in the encoded transform specification says so and nothing in the API reports it, which is why it is stated here; the demo page and the loopback fixture both attach in that order.
+
+`attach` throws synchronously, before any frame flows, for conditions settled up front: no encoded transform in the browser (`unsupported_browser`), a stream id whose length is not 8 or a sender with no track (`invalid_argument`), a sender already attached (`already_attached`), and a blob worker that the page's content security policy refuses (`csp_blocked`). These four are the integration's own codes and are distinct from the codec's, so a caller switching on `code` can tell a setup mistake from a bad frame. The last one is a real deployment failure — a policy without `worker-src blob:` blocks the worker the package builds — so it is detected at attach and reported as a policy error naming the directive, not left as a silent stream that never marks.
 
 `detach` differs by path. On the standard path the transform is removed from the sender. On the fallback, `createEncodedStreams` can be called once per sender and the pipe cannot be undone, so `detach` puts the transform into pass-through: frames continue to flow untouched, and the handle stops updating. The behaviour is documented rather than hidden, because a page that detaches and expects the pipeline gone would otherwise be surprised.
 
@@ -256,7 +274,14 @@ The flag in `docs/format.md` says whether the time is the moment of capture or t
 
 The probe reads `getMetadata()` on the first frame. `captureTime` present means capture time and flag 1. Absent means time of sending and flag 0, taken as `performance.timeOrigin + performance.now()` in the transform, converted to microseconds.
 
-`captureTime` is specified for outgoing frames: WebRTC Encoded Transform §2.1.1 says that when the frame's owner is an encoder the user agent sets the capture time slot from the capture timestamp, by the method the Absolute Capture Time draft describes. Whether a given browser populates it on the send path is an implementation matter and is measured, not assumed: the browser smoke test records what each browser reports, and the result is written into this document when it is known. Until then neither outcome of the probe is treated as the expected one.
+`captureTime` is specified for outgoing frames: WebRTC Encoded Transform §2.1.1 says that when the frame's owner is an encoder the user agent sets the capture time slot from the capture timestamp, by the method the Absolute Capture Time draft describes. Whether a given browser populates it on the send path is an implementation matter, and this design deferred the answer to the smoke test rather than assume it.
+
+**The measurement, 2026-09-13.**
+
+- **Chromium 153: `captureTime` is absent on sender frames.** The probe chose `'send'`; all 117 marked frames of the loopback run carry flag 0. This is the end-to-end result, not a feature test.
+- **Firefox 155: not measured.** No frame ever reached the transform, so the probe never ran. Firefox's H.264 encoder is the OpenH264 GMP, which it fetches at runtime, and the Playwright build ships only `gmp-clearkey`; with H.264 pinned it encodes nothing. The spec's output reports `captureTimeSeen: false` for Firefox, but that is the field's default, not a finding. Firefox's answer is unknown.
+
+So today every seimark stream on Chromium carries send time under flag 0, and a consumer that needs capture time cannot get it from this library there. ADR 0007 records the decision and both states of the measurement. Measuring Firefox is phase 4 work.
 
 `getMetadata` returns the value shifted to be relative to `performance.timeOrigin`, so converting it to Unix microseconds needs the time origin of the context that reads it. On the standard path that is the **worker's** `performance.timeOrigin`, not the document's; the two differ by however long the worker took to start. The conversion is therefore done where the frame is read, in the same context whose origin applies, and never by passing a raw `captureTime` across `postMessage` to be converted on the other side. The same rule makes send time correct on both paths.
 
@@ -276,7 +301,7 @@ The page's own `onError` is called outside the transform on both paths, so a cal
 
 This includes errors that are the page's fault, such as a payload above the hard limit. Reporting them and continuing is better than ending the call to punish a caller mistake; `onError` and the counters make them impossible to miss.
 
-`attach` still throws synchronously for conditions that are settled before any media flows: no encoded transform in the browser, a stream id of the wrong length, a sender with no track.
+This is the never-throw half of the rule; the synchronous throws listed above cover only what is settled before any media flows.
 
 ### Last marker
 
@@ -291,27 +316,35 @@ On the worker path the worker posts the latest marker to the main thread on a co
 The conformance suite is the heart of the phase and runs in Node, with no browser. Tests use `node:test` and `node:assert` from the standard library, not a third-party runner: the tech stack forbids third-party assertion frameworks, and the Go side uses standard library `testing` for the same reason.
 
 - **Vectors, reading `../vectors/`.** Every `markers/NNN.bin` decodes to its `.json`, or throws the error code the `.json` names. Every `nal/NNN.bin` yields the marker array its `.json` holds. Every decodable body survives an encode and decode round trip unchanged. `nal/001-spec-example.bin` is also produced by the encoder and compared byte for byte, which is what holds the SEI container, the size coding and the emulation prevention to the specification.
-- **Writer parity with Go.** `vectors/streams/testsrc-marked.h264` is Annex B and its `.jsonl` holds what the Go side reads from it. The TypeScript reader parses the same file and must produce the same markers; the writer stamps a stripped copy and must produce the same bytes the Go writer did. This works because core keeps the Annex B walker, which the wire needs anyway.
+- **Writer parity with Go.** `vectors/streams/testsrc-marked.h264` is Annex B and its `.jsonl` holds what the Go side reads from it. `test/vectors-stream.test.ts` asserts both directions: the TypeScript reader parses the file and produces the same markers, and the writer strips the markers from all 20 access units and restamps them from the `.jsonl`, which must reproduce the Go writer's bytes exactly. 20 of 20 are byte-identical. This works because core keeps the Annex B walker, which the wire needs anyway.
 - **Transform behaviour, against a fake frame.** A plain object with `data`, `type` and `getMetadata` drives the exported frame-handling function directly: the probe, never-throw, sequence continuity, keyframes-only, pass-through after `detach`, payload replacement, and the coalesced last-marker timer.
-- **One browser smoke test, Playwright, Chrome and Firefox.** A loopback `RTCPeerConnection` in one page: attach to the sender, read markers off the receiver, assert the sequence is continuous and the stream id matches. It is the only test that proves the real API paths work against real encoders, and it covers the standard API in Firefox and the fallback in Chrome. It also records whether each browser populates `captureTime` on a sender frame, which is the measurement the time source section defers to.
+- **One browser smoke test, Playwright.** A loopback `RTCPeerConnection` in one page: attach to the sender, read markers off the receiver, assert the sequence is continuous, the stream id matches and there are no gaps or duplicates. It is the only test that proves a real encoded-transform path works against a real encoder, and it is what produced the `captureTime` measurement above.
+
+  It runs **chromium only** in CI. The Firefox project is still in `playwright.config.ts` and the spec **fails** there rather than being skipped. That is deliberate: with both browsers on the standard API, Firefox is the only browser in the matrix with no fallback to fall back to, so a skip would quietly turn "the standard API is unverified on Firefox" into a green run. The failure names the cause — a browser that negotiates H.264 and then encodes nothing has no H.264 encoder in its build — so it reads as an environment gap rather than a seimark defect. It is isolated: with no seimark in the path, H.264 pinned encodes 0 frames and VP8 pinned encodes 81.
 
 Vectors are never edited to make a test pass. A failing vector means the code or the specification is wrong; which one is decided, and that is what is fixed.
 
-One vector is added this phase: a marker whose payload flag is set with length zero, which no current vector covers and which both implementations must agree on.
+One vector was added this phase, `markers/008-empty-payload`: a marker whose payload flag is set with length zero, which no earlier vector covered and which both implementations must agree on.
 
 ## CI
 
-A second job beside the Go one: Node, `tsc --noEmit` against both tsconfigs, `node --test`, then the Playwright smoke test. The type check, the vectors and the unit tests gate every pull request. The browser test is the slower tail of the same job.
+A `browser` job beside the Go `checks` job in `.github/workflows/ci.yml`, running in `browser/`: `npm ci`, then `npm run typecheck` (`tsc --noEmit` against both tsconfigs), `npm test` (`node --test`), `npm run build`, then `npx playwright install --with-deps chromium` and the loopback spec with `--project=chromium`.
+
+Node 22, the `engines` floor, so CI fails on anything the floor cannot run rather than passing on a newer runtime.
+
+`npm ci` needs `browser/package-lock.json`, which is committed deliberately: the three development dependencies are what the build and the tests run on, and a resolved lockfile is what makes a CI run reproduce a local one.
+
+The type check, the vectors and the unit tests gate every pull request. The browser test is the slower tail of the same job.
 
 ## Demo page
 
-A static page that publishes over WHIP: a canvas source so no camera is needed, `attach` on the sender, and a live display of the stream id, the sequence, the time source the probe chose and the last marker. It is the manual test for the phase and the starting point for the latency page that follows.
+`browser/demo/index.html`: a static page that publishes over WHIP. A canvas source so no camera is needed, an endpoint field and an optional bearer token, `attach` on the sender before `setLocalDescription`, a field that pushes an application payload through `setPayload`, and a live display of the stream id, the sequence, the time source the probe chose, the origin time and the last marker's payload. It POSTs the offer as `application/sdp`, takes the answer from the 201 body and the resource from `Location`, and DELETEs that resource on stop. It reads `handle.lastMarker` and `handle.stats` on a 200 ms poll, which is the same coalescing the handle already applies. It imports `../dist/webrtc/index.js` directly: no CDN, no bundler, no dependency. It is the manual test for the phase and the starting point for the latency page that follows.
 
-It is written against the WHIP specification and this format. It is not derived from any existing publisher: an SEI appended after the frame data, with another UUID and a text body, is a different format with a placement this project has rejected.
+It is written against the WHIP specification and this format. It is not derived from any existing publisher: an SEI appended after the frame data, with another UUID and a text body, is a different format with a placement ADR 0005 rejected.
 
 ## Decisions this phase records
 
 - **ADR 0006**: one package with two entry points, and the worker that embeds the compiled codec.
-- **ADR 0007**: the time source is probed once per stream and stays constant. Written after the smoke test reports which browsers populate `captureTime` on a sender frame, because the decision's consequences depend on that answer.
+- **ADR 0007**: the time source is probed once per stream and stays constant, with the Chromium measurement recorded and Firefox recorded as outstanding.
 
-`specs/tech-stack.md` gains TypeScript's test runner, esbuild and Playwright in the approved table, and the phase confirms that the browser entry carries no framework.
+`specs/tech-stack.md` gained `node:test`, esbuild and Playwright in the approved table, and its browser API row now carries the measured matrix. The browser entry carries no framework and the published package has no runtime dependency.

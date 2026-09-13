@@ -47,3 +47,39 @@ jobs:
         with:
           version: v2.11.3
           args: --timeout=5m
+
+  browser:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: browser
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: install
+        run: npm ci
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: test
+        run: npm test
+
+      - name: build
+        run: npm run build
+
+      - name: install browsers
+        run: npx playwright install --with-deps chromium
+
+      # Chromium only. Firefox needs the OpenH264 GMP, which it downloads at
+      # runtime and the Playwright build does not ship, so it negotiates H.264
+      # and then encodes nothing. The firefox project stays in
+      # playwright.config.ts and e2e/loopback.spec.ts fails there rather than
+      # skipping, because a skip would hide that the standard-API path is
+      # unverified on the one browser with no fallback.
+      - name: e2e
+        run: npm run e2e -- --project=chromium

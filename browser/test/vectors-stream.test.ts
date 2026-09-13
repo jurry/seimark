@@ -2,8 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { markersIn } from '../src/scan.ts';
+import { hasIDR, markersIn, stripMarkers } from '../src/scan.ts';
 import { nalUnits, nalType } from '../src/nal.ts';
+import { Writer } from '../src/writer.ts';
+import { type TimeSource } from '../src/marker.ts';
 
 const vectors = fileURLToPath(new URL('../../vectors/streams/', import.meta.url));
 
@@ -81,4 +83,39 @@ test('reads the go-written annex b stream exactly as the go reader did', () => {
     assert.equal(line.time_source, want[i]!.time_source);
     assert.equal(line.payload, want[i]!.payload);
   }
+});
+
+test('restamps a stripped go-written stream to the same bytes the go writer produced', () => {
+  const stream = new Uint8Array(readFileSync(vectors + 'testsrc-marked.h264'));
+  const want = readFileSync(vectors + 'testsrc-marked.h264.jsonl', 'utf8')
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l) as Line);
+
+  const aus = accessUnits(stream);
+  const byAU = new Map(want.map((l) => [l.au, l]));
+  const streamId = Uint8Array.from(Buffer.from(want[0]!.stream_id, 'hex'));
+  const writer = new Writer({ streamId, timeSource: want[0]!.time_source as TimeSource });
+
+  for (const [i, au] of aus.entries()) {
+    const line = byAU.get(i);
+    if (line === undefined) continue;
+
+    const stripped = stripMarkers(au, 'annexb');
+    const payload = line.payload === undefined
+      ? null
+      : Uint8Array.from(Buffer.from(line.payload, 'base64'));
+    const result = writer.mark(
+      stripped,
+      'annexb',
+      BigInt(line.origin_us),
+      hasIDR(stripped, 'annexb'),
+      payload,
+    );
+
+    assert.equal(result.marked, true);
+    assert.deepEqual(result.data, au, `access unit ${i} differs from the go writer's bytes`);
+  }
+
+  assert.equal(writer.sequence, want.length);
 });
