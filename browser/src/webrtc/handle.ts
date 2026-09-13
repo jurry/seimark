@@ -61,11 +61,17 @@ export class FrameHandler {
   setPayload(bytes: Uint8Array | null): void {
     this.payload = bytes;
     if (bytes !== null && bytes.length > PAYLOAD_SOFT_LIMIT) {
-      this.opts.onWarn(
-        'payload_above_soft_limit',
-        `payload is ${bytes.length} bytes`,
-        this.stats.framesSeen,
-      );
+      // onWarn is a page callback; it must not be able to throw back into the
+      // encoded transform, or a single misbehaving page handler would end the call.
+      try {
+        this.opts.onWarn(
+          'payload_above_soft_limit',
+          `payload is ${bytes.length} bytes`,
+          this.stats.framesSeen,
+        );
+      } catch {
+        // Swallowed deliberately: see comment above.
+      }
     }
   }
 

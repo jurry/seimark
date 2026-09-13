@@ -116,9 +116,13 @@ export function reader(
 
     worker.addEventListener('message', (event: MessageEvent) => {
       if (detached) return;
-      const msg = event.data as { kind: string; marker?: Marker };
+      const msg = event.data as { kind: string; marker?: Marker; count?: number };
+      if (msg.kind === 'frames' && msg.count !== undefined) {
+        stats.framesSeen = msg.count;
+
+        return;
+      }
       if (msg.kind !== 'marker' || msg.marker === undefined) return;
-      stats.framesSeen++;
       record(msg.marker);
       drain();
     });

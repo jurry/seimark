@@ -104,6 +104,21 @@ test('a page onWarn callback that throws does not stop handling', () => {
   assert.equal(h.stats.errors, 1);
 });
 
+test('a page onWarn callback that throws does not stop setPayload', () => {
+  const h = new FrameHandler({
+    writer: new Writer({ streamId: ID }),
+    keyframesOnly: false,
+    nowUs: () => 1789246800000000n,
+    captureUs: (t) => BigInt(Math.round(t * 1000)),
+    onWarn: () => {
+      throw new Error('page bug');
+    },
+  });
+  assert.doesNotThrow(() => {
+    h.setPayload(new Uint8Array(5000));
+  });
+});
+
 test('an empty frame type passes through without an error', () => {
   const { h } = handler();
   const f = { ...frame(annexb(IDR)), type: 'empty' as const };

@@ -68,3 +68,64 @@ test('reader() throws SeimarkError with code unsupported_browser outside a brows
   assert.ok(caught instanceof SeimarkError);
   assert.equal((caught as SeimarkError).code, 'unsupported_browser');
 });
+
+test('on the worker path, framesSeen counts frames, not markers', () => {
+  class FakeWorker {
+    listeners: Record<string, Array<(event: { data: unknown }) => void>> = {};
+    addEventListener(type: string, cb: (event: { data: unknown }) => void): void {
+      (this.listeners[type] ??= []).push(cb);
+    }
+    postMessage(): void {}
+    terminate(): void {}
+    emit(type: string, data: unknown): void {
+      for (const cb of this.listeners[type] ?? []) cb({ data });
+    }
+  }
+
+  let created: FakeWorker | undefined;
+  const globals = globalThis as unknown as {
+    RTCRtpScriptTransform?: unknown;
+    Worker?: unknown;
+  };
+  const previousCtor = globals.RTCRtpScriptTransform;
+  const previousWorker = globals.Worker;
+
+  globals.RTCRtpScriptTransform = class {
+    worker: unknown;
+    options: unknown;
+    constructor(worker: unknown, options: unknown) {
+      this.worker = worker;
+      this.options = options;
+    }
+  };
+  globals.Worker = class extends FakeWorker {
+    constructor() {
+      super();
+      created = this;
+    }
+  };
+
+  try {
+    const fakeReceiver = {} as RTCRtpReceiver;
+    const rh = reader(fakeReceiver, () => {});
+    const worker = created!;
+
+    const marker = {
+      timeSource: 'send' as const,
+      originTimeUs: 0n,
+      sequence: 0,
+      streamId: Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8),
+      payload: null,
+    };
+
+    worker.emit('message', { kind: 'frames', count: 4 });
+    worker.emit('message', { kind: 'marker', marker });
+    worker.emit('message', { kind: 'frames', count: 8 });
+
+    assert.equal(rh.stats.framesSeen, 8);
+    assert.equal(rh.stats.markersFound, 1);
+  } finally {
+    globals.RTCRtpScriptTransform = previousCtor;
+    globals.Worker = previousWorker;
+  }
+});

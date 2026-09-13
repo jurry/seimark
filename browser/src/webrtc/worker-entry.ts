@@ -71,11 +71,20 @@ function startWriter(t: Transformer, options: WriterInit): void {
     .catch(() => undefined);
 }
 
+const READER_FRAME_COUNT_INTERVAL_MS = 100;
+
 function startReader(t: Transformer): void {
+  let framesSeen = 0;
+
+  const timer = setInterval(() => {
+    scope.postMessage({ kind: 'frames', count: framesSeen });
+  }, READER_FRAME_COUNT_INTERVAL_MS);
+
   t.readable
     .pipeThrough(
       new TransformStream({
         transform(frame, controller) {
+          framesSeen++;
           try {
             const data = (frame as { data: ArrayBuffer }).data;
             const { markers } = markersIn(new Uint8Array(data), 'annexb');
@@ -88,7 +97,7 @@ function startReader(t: Transformer): void {
       }),
     )
     .pipeTo(t.writable)
-    .catch(() => undefined);
+    .catch(() => clearInterval(timer));
 }
 
 scope.addEventListener('rtctransform', (event) => {
