@@ -13,10 +13,10 @@
   "typesVersions": { "*": { "webrtc": ["./dist/webrtc/index.d.ts"] } },
   "engines": { "node": ">=22" },
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.core.json && tsc --noEmit -p tsconfig.webrtc.json",
+    "typecheck": "npm run build:worker && tsc --noEmit -p tsconfig.core.json && tsc --noEmit -p tsconfig.webrtc.json",
     "build:worker": "node build/worker.mjs",
     "build": "npm run build:worker && tsc -p tsconfig.webrtc.json",
-    "test": "node --test --experimental-strip-types test/*.test.ts",
+    "test": "npm run build:worker && node --test --experimental-strip-types test/*.test.ts",
     "e2e": "playwright test"
   },
   "devDependencies": {
