@@ -17,6 +17,7 @@
     "build:worker": "node build/worker.mjs",
     "build": "npm run build:worker && tsc -p tsconfig.webrtc.json",
     "test": "npm run build:worker && node --test --experimental-strip-types test/*.test.ts",
+    "demo": "node demo/serve.mjs",
     "e2e": "npm run build && playwright test"
   },
   "devDependencies": {
