@@ -29,84 +29,10 @@ The embedding is an esbuild invocation that emits core's compiled JavaScript as 
 
 ## `seimark`
 
-```ts
-export const VERSION = 1;
-export const FIXED_SIZE = 22;
-export const PAYLOAD_SOFT_LIMIT = 4096;
-export const PAYLOAD_HARD_LIMIT = 65535;
-export const FORMAT_UUID: Readonly<Uint8Array>;
-
-export type TimeSource = 'send' | 'capture';
-
-export interface Marker {
-  timeSource: TimeSource;
-  originTimeUs: bigint;
-  sequence: number;
-  streamId: Uint8Array;
-  payload: Uint8Array | null;
-}
-
-export class SeimarkError extends Error {
-  readonly code: SeimarkErrorCode;
-}
-
-export type SeimarkErrorCode =
-  | 'unsupported_version'
-  | 'truncated'
-  | 'payload_too_large'
-  | 'payload_above_soft_limit'
-  | 'unparsable_sei'
-  | 'no_vcl'
-  | 'already_marked'
-  // Raised only by seimark/webrtc; the union lives here so one `code` switch covers both.
-  | 'unsupported_browser'
-  | 'invalid_argument'
-  | 'already_attached'
-  | 'csp_blocked'
-  | 'unknown';
-
-export function decodeMarker(body: Uint8Array): Marker;
-export function encodeMarker(m: Marker): Uint8Array;
-export function isFormatUUID(uuid: Uint8Array): boolean;
-
-export type Framing = 'annexb' | 'length';
-export function detectFraming(au: Uint8Array): Framing | null;
-export function nalUnits(au: Uint8Array, framing: Framing): Uint8Array[];
-
-export interface ScanResult {
-  markers: Marker[];
-  warnings: SeimarkError[];
-}
-export function markersIn(au: Uint8Array, framing: Framing): ScanResult;
-
-export function stripMarkers(au: Uint8Array, framing: Framing): Uint8Array;
-export function hasIDR(au: Uint8Array, framing: Framing): boolean;
-
-export interface WriterOptions {
-  streamId?: Uint8Array;
-  keyframesOnly?: boolean;
-  timeSource?: TimeSource;
-}
-
-export interface MarkResult {
-  data: Uint8Array;
-  marked: boolean;
-  warning: SeimarkError | null;
-}
-
-export class Writer {
-  constructor(opts?: WriterOptions);
-  readonly streamId: Uint8Array;
-  readonly sequence: number;
-  mark(
-    au: Uint8Array,
-    framing: Framing,
-    atUs: bigint,
-    isKeyframe: boolean,
-    payload?: Uint8Array | null,
-  ): MarkResult;
-}
-```
+The exported surface is `browser/src/index.ts`, and the generated
+`dist/index.d.ts` is its authority; it is not transcribed here, because a copy
+in prose goes stale the first time a signature changes. What follows is why the
+surface has the shape it has.
 
 The names mirror `marker` and `h264` in the Go library so that a reader of one finds the other. The behaviour mirrors them too, and the vectors hold both to it.
 
@@ -193,48 +119,10 @@ The receive-side state a subscriber actually wants is gap and duplicate detectio
 
 ## `seimark/webrtc`
 
-```ts
-export interface AttachOptions {
-  streamId?: Uint8Array;
-  keyframesOnly?: boolean;
-  onError?: (code: SeimarkErrorCode, message: string, frameCount: number) => void;
-  lastMarkerIntervalMs?: number;
-}
-
-export interface SeimarkHandle {
-  readonly streamId: Uint8Array;
-  readonly timeSource: TimeSource;
-  readonly lastMarker: Marker | null;
-  readonly stats: Readonly<{
-    framesSeen: number;
-    framesMarked: number;
-    errors: number;
-  }>;
-  setPayload(bytes: Uint8Array | null): void;
-  detach(): void;
-}
-
-export function attach(sender: RTCRtpSender, opts?: AttachOptions): SeimarkHandle;
-
-export interface ReaderHandle {
-  readonly lastMarker: Marker | null;
-  readonly stats: Readonly<{
-    framesSeen: number;
-    markersFound: number;
-    gaps: number;
-    duplicates: number;
-    streams: number;
-  }>;
-  detach(): void;
-}
-
-export function reader(
-  receiver: RTCRtpReceiver,
-  onMarker: (m: Marker) => void,
-): ReaderHandle;
-```
-
-The receive side gets its own handle. A sender's `SeimarkHandle` carries one stream id, `framesMarked` and `setPayload`, none of which mean anything on a receiver, which sees whatever stream ids arrive and marks nothing.
+The exported surface is `browser/src/webrtc/index.ts`. The receive side gets its
+own handle: a sender's carries one stream id, `framesMarked` and `setPayload`,
+none of which mean anything on a receiver, which sees whatever stream ids arrive
+and marks nothing.
 
 ### Application payload
 
