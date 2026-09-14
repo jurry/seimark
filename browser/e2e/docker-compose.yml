@@ -1,0 +1,13 @@
+# A WHIP server for the demo page and for e2e/whip-verify.mjs.
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:1.9.3
+    container_name: seimark-mediamtx
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8889:8889"      # WHIP (HTTP)
+      - "127.0.0.1:9997:9997"      # API
+      - "127.0.0.1:8189:8189/udp"  # ICE media; UDP, and it must reach the host
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+      - ./recordings:/recordings

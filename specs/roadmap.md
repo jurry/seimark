@@ -27,18 +27,24 @@ Design in `docs/design/go-library.md` before implementation.
 - CLI `seimark nals`: list NAL units per access unit, for debugging.
 - Vectors extended with writer round trips; every vector must survive decode after encode.
 
-## Phase 3 — Browser package. Now
+## Phase 3 — Browser package. Done
 
-- TypeScript marker codec checked against the same vectors.
-- Worker transform over `RTCRtpScriptTransform`, fallback to `createEncodedStreams`.
-- Time source: capture time where the browser exposes it, transform time otherwise.
-- Last-marker exposure to the page, for correlating UI events with frames.
-- A demo page publishing over WHIP.
+- TypeScript marker codec checked against the same vectors, including writer parity: the `testsrc-marked.h264` stream is stripped, restamped and compared byte for byte with what the Go writer produced.
+- One npm package with two entry points, the DOM-free core enforced by `lib` (ADR 0006).
+- Worker transform over `RTCRtpScriptTransform`, fallback to `createEncodedStreams`. Measured 2026-09-13: Chromium 153 and Firefox 155 both expose the standard API, so the fallback has no browser coverage — it is exercised only through the shared frame handler in the Node tests.
+- Time source probed once per stream and constant thereafter (ADR 0007). Chromium 153 does not populate `captureTime` on sender frames, so streams carry send time; Firefox is unmeasured.
+- Last-marker exposure to the page on a coalesced timer, for correlating UI events with frames.
+- A demo page publishing over WHIP from a canvas source.
+- A Playwright loopback test. It runs chromium only in CI: Firefox's H.264 encoder is the OpenH264 GMP, downloaded at runtime and absent from the Playwright build, so the Firefox project fails rather than being skipped, to keep the gap visible.
 
-## Phase 4 — MISB ST 0604 compatibility. Later
+Design in `docs/design/browser-package.md`.
+
+## Phase 4 — MISB ST 0604 compatibility. Now
 
 - Emit the MISB precision time stamp message alongside the marker, read it where present.
 - Conformance check against GStreamer's h264parse and FFmpeg.
+- Capture time from the frame's presentation timestamp where `captureTime` is absent: measure the error of a once-sampled main-thread offset first, and only then decide whether it may be written under flag 1 (ADR 0007 rejected writing it unmeasured).
+- Measure `captureTime` on Firefox sender frames in an environment whose Firefox has the OpenH264 GMP, and record the result.
 
 ## Later
 

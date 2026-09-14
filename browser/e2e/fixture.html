@@ -1,0 +1,123 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>seimark loopback</title>
+<canvas id="src" width="320" height="240"></canvas>
+<script type="module">
+import { attach, reader } from '/dist/webrtc/index.js';
+
+const COLLECT_MS = 4000;
+
+function paint(canvas) {
+  const ctx = canvas.getContext('2d');
+  let n = 0;
+  return setInterval(() => {
+    n++;
+    ctx.fillStyle = `rgb(${n * 7 % 256}, ${n * 13 % 256}, ${n * 29 % 256})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#fff';
+    ctx.font = '48px sans-serif';
+    ctx.fillText(String(n), 20 + (n % 40), 120);
+  }, 33);
+}
+
+function hex(bytes) {
+  let out = '';
+  for (const b of bytes) out += b.toString(16).padStart(2, '0');
+  return out;
+}
+
+async function run() {
+  const errors = [];
+  const canvas = document.getElementById('src');
+  const painter = paint(canvas);
+  const stream = canvas.captureStream(30);
+  const track = stream.getVideoTracks()[0];
+
+  const pcA = new RTCPeerConnection({ iceServers: [] });
+  const pcB = new RTCPeerConnection({ iceServers: [] });
+
+  pcA.addEventListener('icecandidate', (e) => {
+    if (e.candidate !== null) pcB.addIceCandidate(e.candidate).catch(() => {});
+  });
+  pcB.addEventListener('icecandidate', (e) => {
+    if (e.candidate !== null) pcA.addIceCandidate(e.candidate).catch(() => {});
+  });
+
+  const markers = [];
+  const readerReady = new Promise((resolve) => {
+    pcB.addEventListener('track', (e) => {
+      resolve(reader(e.receiver, (m) => markers.push(m)));
+    });
+  });
+
+  const sender = pcA.addTrack(track, stream);
+
+  const h264 = RTCRtpSender.getCapabilities('video').codecs.filter(
+    (c) => c.mimeType.toLowerCase() === 'video/h264',
+  );
+  if (h264.length === 0) throw new Error('this browser offers no H.264 send codec');
+
+  const transceiver = pcA.getTransceivers().find((t) => t.sender === sender);
+  transceiver.setCodecPreferences(h264);
+
+  const handle = attach(sender, {
+    onError: (code, message) => errors.push(`sender ${code}: ${message}`),
+  });
+
+  const offer = await pcA.createOffer();
+  await pcA.setLocalDescription(offer);
+  await pcB.setRemoteDescription(offer);
+
+  const answer = await pcB.createAnswer();
+  await pcB.setLocalDescription(answer);
+  await pcA.setRemoteDescription(answer);
+
+  const readerHandle = await readerReady;
+
+  await new Promise((resolve) => setTimeout(resolve, COLLECT_MS));
+
+  let framesEncoded = 0;
+  let codec = '';
+  for (const [, r] of await pcA.getStats()) {
+    if (r.type === 'outbound-rtp') framesEncoded = r.framesEncoded ?? 0;
+    if (r.type === 'codec' && r.mimeType !== undefined) codec = r.mimeType;
+  }
+
+  clearInterval(painter);
+
+  const senderStats = handle.stats;
+  const readerStats = readerHandle.stats;
+  const timeSource = handle.timeSource;
+  const lastMarker = handle.lastMarker;
+
+  handle.detach();
+  readerHandle.detach();
+  pcA.close();
+  pcB.close();
+  track.stop();
+
+  const streamIds = new Set(markers.map((m) => hex(new Uint8Array(m.streamId))));
+
+  return {
+    sent: senderStats.framesMarked,
+    received: markers.length,
+    sequences: markers.map((m) => m.sequence),
+    streamId: hex(handle.streamId),
+    readerStreamId: streamIds.size === 1 ? [...streamIds][0] : [...streamIds].join(','),
+    timeSource,
+    captureTimeSeen: timeSource === 'capture',
+    lastMarkerSeen: lastMarker !== null,
+    framesEncoded,
+    codec,
+    senderFramesSeen: senderStats.framesSeen,
+    senderErrors: senderStats.errors,
+    readerFramesSeen: readerStats.framesSeen,
+    readerGaps: readerStats.gaps,
+    readerDuplicates: readerStats.duplicates,
+    readerStreams: readerStats.streams,
+    errors,
+  };
+}
+
+window.run = run;
+</script>

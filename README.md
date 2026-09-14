@@ -1,5 +1,7 @@
 # seimark
 
+**Type:** LIVING
+
 Per-frame metadata in H.264 SEI: a wall-clock time, a sequence number, a stream identity and a few bytes of your own data, written into every frame by a browser over WebRTC or by a Go program, and read back by Go from a live stream or a recording.
 
 The marker lives inside the compressed frame, so it survives packetisation, media servers that pass SEI through, recording, remuxing and cutting, as long as nobody re-encodes.

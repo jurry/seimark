@@ -13,9 +13,10 @@ Per-frame metadata in H.264 SEI: a marker format, a Go library and CLI, a browse
 | Constitution | `specs/mission.md`, `specs/tech-stack.md`, `specs/roadmap.md` | LIVING. Changed only between phases, in a commit of their own. |
 | Decisions | `specs/adr/NNNN-title.md` | SNAPSHOT. Never edited; superseded by a new ADR that names the old one. |
 | Format specification | `docs/format.md` | LIVING. Wire changes need a version bump and an ADR. |
-| Designs | `docs/design/<component>.md` | LIVING. One per component, rewritten to current truth when the component changes. No dated duplicates. |
+| Designs | `docs/design/<component>.md` | LIVING. One per component, rewritten to current truth when the component changes. No dated duplicates. Explains why the component is shaped as it is; how to use it belongs in that package's README. |
 | Implementation plans | `plans/` | Not versioned. Written before a phase, deleted when it ships. What must survive goes into a design, an ADR or the roadmap. |
 | Test vectors | `vectors/` | Versioned. The conformance suite for every implementation of the format. |
+| Package documentation | `README.md`, `browser/README.md` | LIVING. The front door for someone using that package: what it is, how to run it, what it cannot do. Points at `docs/` for the format and the designs; never restates them. |
 
 Every document states its type, LIVING or SNAPSHOT, under its title. No "Update:" notes stacked at the bottom of a living document; edit the sentence, git holds the history.
 

@@ -1,0 +1,24 @@
+logLevel: info
+api: yes
+apiAddress: :9997
+
+webrtc: yes
+webrtcAddress: :8889
+webrtcLocalUDPAddress: :8189
+webrtcIPsFromInterfaces: no
+webrtcAdditionalHosts: [127.0.0.1]
+webrtcAllowOrigin: '*'
+
+rtsp: no
+rtmp: no
+hls: no
+srt: no
+
+pathDefaults:
+  record: yes
+  recordPath: /recordings/%path_%Y-%m-%d_%H-%M-%S-%f
+  recordFormat: fmp4
+  recordSegmentDuration: 1h
+
+paths:
+  all_others:
