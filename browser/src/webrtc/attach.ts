@@ -32,6 +32,9 @@ export interface SeimarkHandle {
 
 const DEFAULT_LAST_MARKER_INTERVAL_MS = 100;
 
+// Cleared by detach on the worker path, so a sender can be attached again after a
+// reconnect. The fallback path never clears it: createEncodedStreams is once per
+// sender and its pipe cannot be undone.
 const attached = new WeakSet<RTCRtpSender>();
 
 interface WorkerMessage {
@@ -111,7 +114,9 @@ export function attach(sender: RTCRtpSender, opts: AttachOptions = {}): SeimarkH
   const handle =
     ctor === undefined
       ? fallbackPath(streamsOf!, writer, keyframesOnly, intervalMs, report)
-      : workerPath(sender, ctor, streamId, keyframesOnly, intervalMs, report);
+      : workerPath(sender, ctor, streamId, keyframesOnly, intervalMs, report, () =>
+          attached.delete(sender),
+        );
 
   attached.add(sender);
 
@@ -125,6 +130,7 @@ function workerPath(
   keyframesOnly: boolean,
   lastMarkerIntervalMs: number,
   report: (code: SeimarkErrorCode, message: string, frames: number) => void,
+  release: () => void,
 ): SeimarkHandle {
   const worker = buildWorker();
   const target = sender as RTCRtpSender & { transform: RTCRtpScriptTransform | null };
@@ -177,6 +183,7 @@ function workerPath(
       detached = true;
       target.transform = null;
       worker.terminate();
+      release();
     },
   };
 }

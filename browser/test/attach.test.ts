@@ -4,9 +4,55 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { trackSequence, reader } from '../src/webrtc/reader.ts';
+import { attach } from '../src/webrtc/attach.ts';
 import { SeimarkError } from '../src/errors.ts';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
+
+/**
+ * Runs body with the standard transform API and just enough of the worker
+ * plumbing present for attach to take the worker path under node:test.
+ * `makeWorker` stands in for the Worker constructor, so a test can make it throw
+ * the way a content security policy does.
+ */
+function withTransform(body: () => void, makeWorker: () => unknown = () => ({
+  addEventListener: () => {},
+  postMessage: () => {},
+  terminate: () => {},
+})): void {
+  const globals = globalThis as unknown as {
+    RTCRtpScriptTransform?: unknown;
+    Worker?: unknown;
+    Blob?: unknown;
+    URL?: unknown;
+  };
+  const previous = {
+    ctor: globals.RTCRtpScriptTransform,
+    worker: globals.Worker,
+    url: globals.URL,
+  };
+
+  globals.RTCRtpScriptTransform = class {
+    constructor(_worker: unknown, _options: unknown) {}
+  };
+  globals.Worker = function (this: unknown) {
+    return makeWorker();
+  };
+  globals.URL = class {
+    static createObjectURL(): string {
+      return 'blob:seimark-test';
+    }
+    static revokeObjectURL(): void {}
+  };
+
+  try {
+    body();
+  } finally {
+    globals.RTCRtpScriptTransform = previous.ctor;
+    globals.Worker = previous.worker;
+    globals.URL = previous.url;
+  }
+}
 
 test('the worker build produces a source string containing the codec', () => {
   execFileSync('node', ['build/worker.mjs'], { cwd: root, encoding: 'utf8' });
@@ -128,4 +174,76 @@ test('on the worker path, framesSeen counts frames, not markers', () => {
     globals.RTCRtpScriptTransform = previousCtor;
     globals.Worker = previousWorker;
   }
+});
+
+// The four conditions attach settles before any frame flows. Each throws
+// synchronously, so none of them needs a peer connection.
+test('attach throws unsupported_browser when the browser has neither transform API', () => {
+  const globals = globalThis as unknown as { RTCRtpScriptTransform?: unknown };
+  const previous = globals.RTCRtpScriptTransform;
+  delete globals.RTCRtpScriptTransform;
+
+  try {
+    const sender = { track: {} } as unknown as RTCRtpSender;
+    assert.throws(
+      () => attach(sender),
+      (e: unknown) => e instanceof SeimarkError && e.code === 'unsupported_browser',
+    );
+  } finally {
+    globals.RTCRtpScriptTransform = previous;
+  }
+});
+
+test('attach throws invalid_argument for a stream id that is not 8 bytes', () => {
+  withTransform(() => {
+    const sender = { track: {} } as unknown as RTCRtpSender;
+    assert.throws(
+      () => attach(sender, { streamId: Uint8Array.of(1, 2, 3) }),
+      (e: unknown) => e instanceof SeimarkError && e.code === 'invalid_argument',
+    );
+  });
+});
+
+test('attach throws invalid_argument for a sender with no track', () => {
+  withTransform(() => {
+    const sender = { track: null } as unknown as RTCRtpSender;
+    assert.throws(
+      () => attach(sender),
+      (e: unknown) => e instanceof SeimarkError && e.code === 'invalid_argument',
+    );
+  });
+});
+
+test('attach throws already_attached for a sender that is already attached', () => {
+  withTransform(() => {
+    const sender = { track: {}, transform: null } as unknown as RTCRtpSender;
+    attach(sender);
+    assert.throws(
+      () => attach(sender),
+      (e: unknown) => e instanceof SeimarkError && e.code === 'already_attached',
+    );
+  });
+});
+
+test('attach throws csp_blocked when the policy refuses the blob worker', () => {
+  withTransform(
+    () => {
+      const sender = { track: {}, transform: null } as unknown as RTCRtpSender;
+      assert.throws(
+        () => attach(sender),
+        (e: unknown) => e instanceof SeimarkError && e.code === 'csp_blocked',
+      );
+    },
+    () => {
+      throw new Error('Refused to create a worker from blob:');
+    },
+  );
+});
+
+test('a sender can be attached again after detach on the worker path', () => {
+  withTransform(() => {
+    const sender = { track: {}, transform: null } as unknown as RTCRtpSender;
+    attach(sender).detach();
+    assert.doesNotThrow(() => attach(sender));
+  });
 });
