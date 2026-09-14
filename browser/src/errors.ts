@@ -9,7 +9,9 @@ export type SeimarkErrorCode =
   | 'unsupported_browser'
   | 'invalid_argument'
   | 'already_attached'
-  | 'csp_blocked';
+  | 'csp_blocked'
+  // Not raised by this package: the handler's label for a foreign exception.
+  | 'unknown';
 
 export class SeimarkError extends Error {
   readonly code: SeimarkErrorCode;

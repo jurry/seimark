@@ -113,7 +113,9 @@ running sender sees `framesSeen: 0`.
 in the browser, a stream id whose length is not 8, a sender with no track, a
 sender already attached. Once frames flow it never throws: a frame that cannot be
 marked is passed through unchanged, `stats.errors` advances, and `onError` is
-called. A library that adds metadata to somebody's call must never be the reason
+called with the first occurrence of each distinct code — a stream failing every
+frame reports once, not thirty times a second, while a second, different failure
+is still reported. A library that adds metadata to somebody's call must never be the reason
 the call stopped.
 
 `lastMarker` and `stats` are refreshed on a coalesced timer,

@@ -145,6 +145,23 @@ test('the payload set by the page is written into the marker', () => {
   assert.deepEqual(markersIn(new Uint8Array(f.data), 'annexb').markers[0]!.payload, Uint8Array.of(9, 9));
 });
 
+test('a repeated error warns once, but a different code warns again', () => {
+  const { h, warnings } = handler();
+  const noVCL = () => frame(annexb(Uint8Array.of(0x67, 0x11)));
+
+  h.handle(noVCL());
+  h.handle(noVCL());
+  h.handle(noVCL());
+  assert.equal(h.stats.errors, 3);
+  assert.equal(warnings.filter(([c]) => c === 'no_vcl').length, 1);
+
+  const marked = frame(annexb(IDR));
+  h.handle(marked);
+  h.handle({ ...marked, data: marked.data });
+  assert.equal(warnings.filter(([c]) => c === 'already_marked').length, 1);
+  assert.ok(warnings.length >= 2, 'a second distinct code must still be reported');
+});
+
 test('a payload over the soft limit warns once when set, not per frame', () => {
   const { h, warnings } = handler();
   h.setPayload(new Uint8Array(4097));

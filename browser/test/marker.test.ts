@@ -45,7 +45,7 @@ test('a payload over the hard limit is payload_too_large', () => {
 test('a stream id of the wrong length is rejected', () => {
   let err: SeimarkError | undefined;
   try { encodeMarker({ ...base, streamId: new Uint8Array(7) }); } catch (e) { err = e as SeimarkError; }
-  assert.equal(err?.code, 'truncated');
+  assert.equal(err?.code, 'invalid_argument');
 });
 
 test('isFormatUUID matches only the format uuid', () => {

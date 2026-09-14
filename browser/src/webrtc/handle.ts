@@ -31,7 +31,7 @@ export class FrameHandler {
   private payload: Uint8Array | null = null;
   private timeSource: TimeSource = 'send';
   private probed = false;
-  private warned = false;
+  private readonly warned = new Set<SeimarkErrorCode>();
 
   private writer: Writer;
   private readonly opts: HandlerOptions;
@@ -117,9 +117,9 @@ export class FrameHandler {
       }
     } catch (e) {
       this.stats.errors++;
-      if (!this.warned) {
-        this.warned = true;
-        const code = e instanceof SeimarkError ? e.code : 'unparsable_sei';
+      const code = e instanceof SeimarkError ? e.code : 'unknown';
+      if (!this.warned.has(code)) {
+        this.warned.add(code);
         const message = e instanceof Error ? e.message : String(e);
         // onWarn is a page callback; it must not be able to throw back into the
         // encoded transform, or a single misbehaving page handler would end the call.

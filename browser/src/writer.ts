@@ -33,7 +33,7 @@ export class Writer {
 
   constructor(opts: WriterOptions = {}) {
     if (opts.streamId !== undefined && opts.streamId.length !== STREAM_ID_SIZE) {
-      throw new SeimarkError('truncated', `stream id is ${opts.streamId.length} bytes, needs ${STREAM_ID_SIZE}`);
+      throw new SeimarkError('invalid_argument', `stream id is ${opts.streamId.length} bytes, needs ${STREAM_ID_SIZE}`);
     }
     this.streamId = opts.streamId ?? crypto.getRandomValues(new Uint8Array(STREAM_ID_SIZE));
     this.keyframesOnly = opts.keyframesOnly ?? false;

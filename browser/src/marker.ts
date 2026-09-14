@@ -74,10 +74,10 @@ export function decodeMarker(body: Uint8Array): Marker {
 
 export function encodeMarker(m: Marker): Uint8Array {
   if (m.streamId.length !== STREAM_ID_SIZE) {
-    throw new SeimarkError('truncated', `stream id is ${m.streamId.length} bytes, needs ${STREAM_ID_SIZE}`);
+    throw new SeimarkError('invalid_argument', `stream id is ${m.streamId.length} bytes, needs ${STREAM_ID_SIZE}`);
   }
   if (m.originTimeUs < INT64_MIN || m.originTimeUs > INT64_MAX) {
-    throw new SeimarkError('truncated', 'origin time is outside the signed 64-bit range');
+    throw new SeimarkError('invalid_argument', 'origin time is outside the signed 64-bit range');
   }
   if (m.payload !== null && m.payload.length > PAYLOAD_HARD_LIMIT) {
     throw new SeimarkError('payload_too_large', `payload is ${m.payload.length} bytes`);

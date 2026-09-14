@@ -62,7 +62,8 @@ export type SeimarkErrorCode =
   | 'unsupported_browser'
   | 'invalid_argument'
   | 'already_attached'
-  | 'csp_blocked';
+  | 'csp_blocked'
+  | 'unknown';
 
 export function decodeMarker(body: Uint8Array): Marker;
 export function encodeMarker(m: Marker): Uint8Array;
@@ -117,7 +118,7 @@ The names mirror `marker` and `h264` in the Go library so that a reader of one f
 
 A payload longer than `PAYLOAD_HARD_LIMIT` is `payload_too_large`. The soft limit is the writer's concern, not the codec's.
 
-`sequence` is a `number` holding a uint32 and wraps modulo 2^32, as the format says. `encodeMarker` throws `truncated` for a `streamId` whose length is not 8, and for an `originTimeUs` outside the signed 64-bit range.
+`sequence` is a `number` holding a uint32 and wraps modulo 2^32, as the format says. `encodeMarker` throws `invalid_argument` for a `streamId` whose length is not 8, and for an `originTimeUs` outside the signed 64-bit range: both are caller mistakes, and `truncated` means the input was shorter than the format needs, which would mislead a caller switching on the code.
 
 `originTimeUs` is a `bigint`, not a `number`. The field is a signed 64-bit count of microseconds and the vectors include a negative time; a `number` would decode `007-negative-time` incorrectly and would lose precision at the top of the range. The cost is ergonomics at the boundary, which `attach` hides from the page.
 
@@ -294,6 +295,8 @@ Where `captureTime` is absent, a capture time could still be derived from `metad
 No failure in the package propagates into the stream pipeline. A frame that cannot be marked is enqueued unchanged, `stats.errors` advances, and `onError` is called with the error and the frame count.
 
 The reason is in the Streams standard rather than in the encoded transform specification, which does not cover it: a throw from a `transform` callback errors both sides of the transform stream, the error propagates through the pipe chain, and no further chunks are processed. In an encoded transform that is the end of the video. A library that adds metadata to somebody's call must never be the reason the call stopped.
+
+`onError` reports the first occurrence of each distinct code and then stays quiet for that code, so a stream failing every frame is a diagnosis rather than a log flood, while a second, different failure is still reported. `stats.errors` counts every one.
 
 `onError` receives a code and a message, not a `SeimarkError`. On the worker path the error crosses `postMessage`, and structured clone reduces an `Error` subclass to a plain `Error`, dropping both the prototype and the `code` field, so an object would arrive stripped of the only part worth switching on. Passing the code explicitly behaves the same on both paths.
 
