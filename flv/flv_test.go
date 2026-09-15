@@ -98,7 +98,6 @@ func mustCollect(t *testing.T, in []byte) []container.Sample {
 
 func TestFixtureSamples(t *testing.T) {
 	t.Parallel()
-	t.Skip("vectors/streams/testsrc-marked.flv is generated in task 7")
 
 	f, err := os.Open(filepath.Join("..", "vectors", "streams", "testsrc-marked.flv"))
 	if err != nil {

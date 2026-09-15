@@ -109,7 +109,6 @@ func TestNalsReadsFLVAndTS(t *testing.T) {
 	for _, name := range []string{"testsrc-marked.flv", "testsrc-marked.ts"} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			skipUntilFixtureExists(t, name)
 
 			var out, errOut bytes.Buffer
 			if code := run([]string{"nals", fixturePath(name)}, &out, &errOut); code != 0 {

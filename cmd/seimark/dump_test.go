@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,7 +17,6 @@ func TestDumpGolden(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			skipUntilFixtureExists(t, name)
 
 			path := filepath.Join("..", "..", "vectors", "streams", name)
 
@@ -189,16 +187,6 @@ func TestDumpWarnsOnUnparsableSEIAndKeepsGoing(t *testing.T) {
 	}
 }
 
-// skipUntilFixtureExists skips a test whose stream fixture task 7 has not
-// generated yet.
-func skipUntilFixtureExists(t *testing.T, name string) {
-	t.Helper()
-
-	if _, err := os.Stat(fixturePath(name)); errors.Is(err, os.ErrNotExist) {
-		t.Skip("fixture " + name + " is not generated yet")
-	}
-}
-
 func TestSniffDetectsEveryFixture(t *testing.T) {
 	t.Parallel()
 
@@ -214,7 +202,6 @@ func TestSniffDetectsEveryFixture(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			skipUntilFixtureExists(t, tc.name)
 
 			f, err := os.Open(fixturePath(tc.name))
 			if err != nil {
@@ -296,7 +283,6 @@ func TestDumpExplicitFormatMatchesAuto(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			skipUntilFixtureExists(t, tc.name)
 
 			path := fixturePath(tc.name)
 

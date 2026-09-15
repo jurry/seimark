@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -124,14 +126,89 @@ func collect(t *testing.T, b []byte) ([]container.Sample, error) {
 	return got, err
 }
 
+// fixtureSamples reads the committed MPEG-TS stream vector.
+func fixtureSamples(t *testing.T) []container.Sample {
+	t.Helper()
+
+	f, err := os.Open(filepath.Join("..", "vectors", "streams", "testsrc-marked.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() { _ = f.Close() }()
+
+	var samples []container.Sample
+
+	for s, err := range VideoSamples(f) {
+		if err != nil {
+			t.Fatalf("VideoSamples: %v", err)
+		}
+
+		samples = append(samples, s)
+	}
+
+	return samples
+}
+
 func TestFixtureSamples(t *testing.T) {
 	t.Parallel()
-	t.Skip("vectors/streams/testsrc-marked.ts is generated in task 7")
+
+	samples := fixtureSamples(t)
+
+	if len(samples) != 20 {
+		t.Fatalf("got %d samples, want 20", len(samples))
+	}
+
+	if !samples[0].Sync {
+		t.Error("sample 0: Sync = false, want true")
+	}
+
+	for i, s := range samples {
+		if s.Index != i {
+			t.Errorf("sample %d: Index = %d", i, s.Index)
+		}
+
+		if s.Timescale != Timescale {
+			t.Errorf("sample %d: Timescale = %d, want %d", i, s.Timescale, Timescale)
+		}
+
+		if s.Framing != container.FramingAnnexB {
+			t.Errorf("sample %d: Framing = %v, want annexb", i, s.Framing)
+		}
+
+		if !bytes.HasPrefix(s.Data, []byte{0, 0, 0, 1}) {
+			t.Errorf("sample %d: Data does not start with a four-byte start code", i)
+		}
+
+		if i > 0 && s.DTS < samples[i-1].DTS {
+			t.Errorf("sample %d: DTS = %d, below the previous %d", i, s.DTS, samples[i-1].DTS)
+		}
+	}
 }
 
 func TestMarkersSurviveTheDemux(t *testing.T) {
 	t.Parallel()
-	t.Skip("vectors/streams/testsrc-marked.ts is generated in task 7")
+
+	samples := fixtureSamples(t)
+
+	if len(samples) != 20 {
+		t.Fatalf("got %d samples, want 20", len(samples))
+	}
+
+	for i, s := range samples {
+		ms, err := h264.Markers(s.Data, s.Framing.H264())
+		if err != nil {
+			t.Fatalf("sample %d: Markers: %v", i, err)
+		}
+
+		if len(ms) != 1 {
+			t.Fatalf("sample %d: %d markers, want 1", i, len(ms))
+		}
+
+		if ms[0].Sequence != uint32(i) {
+			t.Errorf("sample %d: Sequence = %d", i, ms[0].Sequence)
+		}
+	}
 }
 
 func TestSyncsFromFirstIDR(t *testing.T) {
