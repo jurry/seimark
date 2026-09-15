@@ -8,8 +8,11 @@ format, in any language, must produce these results.
   `unsupported_version`, `truncated`.
 - `nal/NNN-name.bin`: a complete SEI NAL unit, emulation prevention applied.
   `NNN-name.json`: the markers a reader must find in it, as a JSON array.
-- `streams/`: Annex B and MP4 fixtures with a marker before the first VCL NAL
-  unit of every access unit, and the expected `seimark dump -out jsonl` output.
+- `streams/`: Annex B, MP4, FLV and MPEG-TS fixtures with a marker before the
+  first VCL NAL unit of every access unit, and the expected
+  `seimark dump -out jsonl` output. All five carry the same twenty markers: the
+  Annex B fixture is the original and the others are it remuxed with
+  `ffmpeg -c copy`, so only the container timing columns differ.
   `gen/` regenerates them; the results are committed.
 
 Vectors are never edited to make a test pass.
