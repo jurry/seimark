@@ -1,19 +1,22 @@
 # Design: Go library and CLI
 
-**Type:** LIVING. Describes the Go side: phase 1 (reader and `dump`, shipped) and phase 2 (writer, `inject`, `nals`, done). Rewritten as later phases change it.
+**Type:** LIVING. Describes the Go side: the marker codec, the access-unit and writer work in `h264`, the container readers for MP4, FLV and MPEG-TS, and the CLI. Rewritten as later phases change it.
 
 ## Shape
 
-Module `github.com/jurry/seimark`, Go 1.26, `CGO_ENABLED=0`, one dependency: `github.com/Eyevinn/mp4ff` v0.56.0.
+Module `github.com/jurry/seimark`, Go 1.26, `CGO_ENABLED=0`, two dependencies: `github.com/Eyevinn/mp4ff` v0.56.0 and `github.com/asticode/go-astits` for MPEG-TS demultiplexing (ADR 0008).
 
 | Package | Owns | Depends on |
 |---|---|---|
 | `marker` | The marker body codec from `docs/format.md`: types, constants, `Decode`, `Encode`, errors. | standard library |
 | `h264` | Access-unit level work: format detection, NAL unit splitting, finding markers in an access unit, splitting an Annex B byte stream into access units, and the writer that puts markers into access units. | `marker`, mp4ff `avc` and `sei` |
-| `mp4` | Iterating the video samples of an MP4 file, progressive or fragmented, with timing and sync flags. | mp4ff `mp4` |
+| `container` | The `Sample` type the three readers yield. | standard library |
+| `mp4` | Iterating the video samples of an MP4 file, progressive or fragmented, with timing and sync flags. | `container`, mp4ff `mp4` |
+| `flv` | Iterating the AVC video tags of an FLV stream with timing and keyframe flags. | `container`, standard library |
+| `ts` | Demultiplexing the first H.264 elementary stream of an MPEG-TS stream into access units. | `container`, `h264`, go-astits |
 | `cmd/seimark` | The CLI: `dump`, `inject`, `nals`. | all of the above |
 
-Principles: bytes in, bytes out, no ownership tricks beyond documented subslicing; no state except in the phase 2 writer; iterators (`iter.Seq2`) for anything that can be large; errors returned with context, never logged; nothing in the library prints.
+Principles: bytes in, bytes out, no ownership tricks beyond documented subslicing; no state except in the writer; iterators (`iter.Seq2`) for anything that can be large; errors returned with context, never logged; nothing in the library prints.
 
 ## `marker`
 
@@ -90,24 +93,45 @@ func AccessUnits(r io.Reader) iter.Seq2[[]byte, error]
 - **Markers.** For every NAL unit of type 6: `SEIMessages`, then keep the decoded markers. Foreign SEI and foreign unregistered UUIDs are skipped without error. An SEI NAL unit mp4ff cannot parse is skipped but not hidden: the scan finishes and returns the markers found together with an error wrapping the exported `ErrUnparsableSEI`, which callers can test with `errors.Is` and treat as advisory — the CLI warns on it and keeps going. A message with the seimark UUID that fails to decode ends the scan at once and returns the markers found so far with that error. The order of the result is the order in the access unit.
 - **Access units from a byte stream.** `AccessUnits` reads an Annex B stream incrementally through a `bufio.Reader`, finds start codes, and groups NAL units into access units with the standard rule and no exception: once the current access unit contains a VCL NAL unit (types 1 to 5), the next NAL unit starts a new access unit if it is an access-unit delimiter, SPS, PPS or SEI, or if it is a VCL NAL unit whose `first_mb_in_slice` is zero. `first_mb_in_slice` is the first Exp-Golomb value after the header; it is zero exactly when the first bit of the byte after the header is 1, so the check is `nal[1] & 0x80 != 0`. Each yielded access unit is Annex B bytes with four-byte start codes, valid input for `Markers` with `FormatAnnexB`. A read error ends the sequence with that error; a final access unit without a trailing start code is yielded before the sequence ends. Leading bytes before the first start code are ignored.
 
+## `container`
+
+The three container readers yield the same type, so a consumer reads MP4, FLV and MPEG-TS alike and `dump` has one emit loop.
+
+```go
+type Framing int
+const (
+    FramingLengthPrefixed Framing = iota // MP4 and FLV: four-byte big-endian lengths
+    FramingAnnexB                        // MPEG-TS: start codes
+)
+
+type Sample struct {
+    Index     int     // 0-based position in the stream
+    DTS       uint64  // decode time in Timescale units
+    PTS       int64   // presentation time in Timescale units
+    Timescale uint32
+    Sync      bool
+    Framing   Framing // how Data carries its NAL units
+    Data      []byte
+}
+
+func (f Framing) H264() h264.Format
+```
+
+- `Framing` is the one field the mp4-only struct did not have: MP4 and FLV store length-prefixed NAL units, MPEG-TS carries Annex B, and a consumer that hardcoded `h264.FormatLengthPrefixed` would silently find no markers in a transport stream. Carrying the framing with the bytes makes the mistake impossible.
+- The type lives in its own package rather than in `mp4`, so `flv` and `ts` do not import an MP4 parser to name their result, and rather than in `h264`, which knows nothing about containers.
+- `Framing.H264` maps to the `h264.Format` constant the marker and NAL calls take. It is the only place the mapping is written.
+- This replaces `mp4.Sample`, which is an API break: `mp4.VideoSamples` now yields `container.Sample`. The module is at v0 and the only consumers are in this repository and the sibling measurement project, so the break is taken rather than kept as an alias.
+
 ## `mp4`
 
 ```go
-type Sample struct {
-    Index     int    // 0-based position in the track
-    DTS       uint64 // decode time in Timescale units
-    PTS       int64  // DTS plus composition offset minus the first edit-list media time, if any
-    Timescale uint32
-    Sync      bool
-    Data      []byte // length-prefixed NAL units as stored in the file
-}
-
 var ErrNoVideoTrack error
 var ErrMalformedFile error
 
-func VideoSamples(r io.ReadSeeker) iter.Seq2[Sample, error]
+func VideoSamples(r io.ReadSeeker) iter.Seq2[container.Sample, error]
 ```
 
+- Yields `container.Sample` with `Framing` always `FramingLengthPrefixed`. `PTS` is DTS plus the composition offset minus the first edit-list media time, if any.
 - Decodes the file with mp4ff `mp4.DecodeFile` in normal mode, which reads the file into memory. Lazy mdat reading is a later improvement; phase 1 fixtures are small and the API does not change.
 - Picks the first track whose handler is `vide` and whose sample entry is `avc1` or `avc3`. A video track in another codec is passed over, so an H.264 track behind an HEVC one is still found; when no track qualifies the error is `ErrNoVideoTrack` naming the sample entries that were seen.
 - Progressive files: iterate with the stbl helpers the way mp4ff's own `mp4ff-nallister` does: `Stsz` for count and size, `Stsc.ChunkNrFromSampleNr` and `Stco` or `Co64` for the byte range, `Stts.GetDecodeTime`, `Ctts.GetCompositionTimeOffset` when present, `Stss` for sync (absent `Stss` means every sample is sync), `mdat.ReadData` for the bytes.
@@ -115,21 +139,68 @@ func VideoSamples(r io.ReadSeeker) iter.Seq2[Sample, error]
 - Fragmented files: for every fragment, `GetFullSamples(trex)`; data, decode time and composition offset come from the full sample. Sync is `!mp4.DecodeSampleFlags(Flags).SampleIsNonSync`, the test ISO 14496-12 defines; mp4ff's `Sample.IsSync` also requires `sample_depends_on == 2`, which the standard does not, so a sync sample written with `depends_on` unknown would be missed. A fragment whose `Moof` or `Mdat` is missing ends the iteration with `ErrMalformedFile`, because mp4ff panics on it.
 - Edit list: only the first entry of the first `elst` is honoured. A positive media time is subtracted from every `PTS`; a media time of -1 (an empty edit) adds the entry's segment duration converted from the movie timescale to the track timescale. Anything more elaborate is out of scope.
 
+## `flv`
+
+```go
+var (
+    ErrNotFLV       error
+    ErrNoVideoTrack error
+    ErrMalformedFLV error
+)
+
+const Timescale = 1000 // FLV timestamps are milliseconds
+
+func VideoSamples(r io.Reader) iter.Seq2[container.Sample, error]
+func (s *Stream) SPS() []byte
+func (s *Stream) PPS() []byte
+```
+
+- Hand-written on the standard library. FLV is a nine-byte header, then tags of a one-byte type, a three-byte data size, a three-byte timestamp with a fourth byte of high bits, a three-byte stream id, the data, and a four-byte previous-tag size. Reading that needs no library, and the only Go libraries that offer it bring a second MP4 parser with them (ADR 0008).
+- **`io.Reader`, not `io.ReadSeeker`.** An FLV file is a forward list of tags with no index to seek to, and the recordings this reads come off a pipe or an HTTP body as often as off a disk. The same holds for `ts`; only `mp4` needs seeking, because its sample tables may sit behind the media data.
+- **Legacy AVC only.** A video tag whose codec id is 7 in the low nibble of its first data byte is AVC. Its second byte is the AVC packet type: 0 is the sequence header holding the `AVCDecoderConfigurationRecord`, from which the SPS and PPS are kept and exposed; 1 is a NAL unit sample; 2 is the end of sequence and is skipped. Bytes 3 to 5 are the composition offset, signed 24-bit.
+- **Enhanced RTMP is not read.** A tag whose first data byte has the high bit set carries a FourCC codec identifier rather than a codec id, which is how `hvc1`, `av01` and the enhanced `avc1` are signalled. Those tags end the iteration with `ErrNoVideoTrack`, naming the FourCC, rather than being silently skipped: a file of enhanced tags would otherwise dump as an empty stream and look like a file without markers. Reading them is a later phase if a server that writes them turns up.
+- **Timing.** `DTS` is the tag timestamp in milliseconds, `Timescale` is 1000, `PTS` is `DTS` plus the composition offset. A tag timestamp is unsigned 24 bits plus an eight-bit extension, so it does not wrap inside a recording of any plausible length.
+- **Sync** is the frame type in the high nibble of the first data byte: 1 is a keyframe.
+- **Data** is the tag's remaining bytes, which are already length-prefixed NAL units with the length size from the configuration record. A length size other than 4 is `ErrMalformedFLV`, because `container.Sample` promises four-byte lengths and rewriting the prefixes to hide a 1- or 2-byte size would copy every sample for a case no encoder in this path produces.
+- Audio, script and other tags are skipped. A file whose first three bytes are not `FLV` is `ErrNotFLV`. A tag whose declared data size runs past the end of the stream is `ErrMalformedFLV` naming the tag offset.
+- Parameter sets are not spliced into the samples. A marker reader does not need them, and inventing an in-band SPS the file does not contain would change the bytes a consumer sees. `SPS` and `PPS` expose them for a consumer that does need them.
+
+## `ts`
+
+```go
+var (
+    ErrNoVideoTrack error
+    ErrMalformedTS  error
+)
+
+const Timescale = 90000 // the MPEG-TS 90 kHz clock
+
+func VideoSamples(r io.Reader) iter.Seq2[container.Sample, error]
+```
+
+- Demultiplexing is go-astits (ADR 0008): PAT, PMT, packet reassembly and PES header parsing, none of which is specific to this project. Above it, our own code does the two things that are: concatenating the PES payloads of the elementary stream and cutting access units out of the result with the same `h264.AccessUnits` rule the Annex B reader uses. One rule, one implementation, so the three readers cannot disagree about where an access unit begins.
+- **Stream selection.** The first PMT elementary stream whose type is H.264 (0x1B) is read; the rest, audio included, are dropped. No H.264 stream in the first PMT is `ErrNoVideoTrack` naming the stream types that were seen, which matches `mp4.ErrNoVideoTrack`.
+- **Sync from the IDR NAL unit.** A recording usually starts mid-stream, so the first access units may be non-IDR pictures referring to frames that are not there and may be missing their parameter sets. Nothing is yielded until an access unit containing an IDR NAL unit (type 5) is seen; from there every access unit is yielded. `Index` counts from 0 at that first IDR, not at the first packet, so the indices in `dump` output are contiguous.
+- **Timing.** The PTS and DTS of a PES packet apply to the access unit that *starts* in that packet. A PES packet can carry more than one access unit and an access unit can span several PES packets, so the rule is: when the cut yields an access unit, it takes the timestamps of the PES packet in which its first byte arrived. An access unit that begins before the first PES with a timestamp, which can only be at the start of a recording, is dropped with the rest of the pre-IDR units. `Timescale` is 90000. A PES without a DTS takes DTS from PTS, which is what `PTS_DTS_flags == 2` means.
+- **Wrapping is not unwrapped.** The 33-bit clock wraps after about 26.5 hours. Timestamps are reported as they appear in the stream, so a recording that crosses a wrap shows a jump. Unwrapping would need a heuristic about how far back a timestamp may legitimately go, and a marker carries its own wall-clock time, which is the answer to the question a jump would otherwise raise. Documented here and in the `ts` package documentation.
+- **Data** is Annex B with four-byte start codes, as `h264.AccessUnits` produces, so `Framing` is `FramingAnnexB`.
+- A stream that is not MPEG-TS, or whose packets do not align, is `ErrMalformedTS`; go-astits' own errors are wrapped with the context of what was being read.
+
 ## `cmd/seimark dump`
 
 ```
-seimark dump [-format auto|annexb|mp4] [-out jsonl|csv] [-all] FILE
+seimark dump [-format auto|annexb|mp4|flv|ts] [-out jsonl|csv] [-all] FILE
 ```
 
-- `-format auto` (default) picks `mp4` when the file starts with a box header whose type is `ftyp`, `moov`, `moof` or `styp`, and `annexb` when it starts with a start code; otherwise the command fails with exit code 2 asking for `-format`.
+- `-format auto` (default) reads the first bytes and picks: `mp4` for a box header whose type is `ftyp`, `moov`, `moof` or `styp`; `flv` for the signature `FLV` followed by version 1; `ts` for the sync byte `0x47` at offsets 0 and 188, which distinguishes a transport stream from a file that merely starts with `0x47`; `annexb` for a start code. Otherwise the command fails with exit code 2 asking for `-format`. MP4 is tested first because a box header can otherwise be mistaken for nothing else; the TS test needs 189 bytes of read-ahead, so the sniff buffer grew to that.
 - One record per marker. An access unit with two markers produces two records, `marker_index` 0 and 1. With `-all`, access units without a marker produce one record with the marker fields absent.
 - JSON Lines, one object per line, keys in this order:
 
   | Key | Present | Meaning |
   |---|---|---|
   | `au` | always | 0-based index of the access unit or sample |
-  | `dts`, `pts`, `timescale`, `sync` | mp4 only | from `mp4.Sample` |
-  | `time` | mp4 only | `pts / timescale` in seconds, float |
+  | `dts`, `pts`, `timescale`, `sync` | container formats | from `container.Sample`; absent for Annex B, which has no timing |
+  | `time` | container formats | `pts / timescale` in seconds, float |
   | `marker_index` | when a marker is present | position among the markers of this access unit |
   | `version` | marker | 1 |
   | `time_source` | marker | `"send"` or `"capture"` |
@@ -139,7 +210,8 @@ seimark dump [-format auto|annexb|mp4] [-out jsonl|csv] [-all] FILE
   | `stream_id` | marker | 16 hex characters |
   | `payload` | marker, when the flag is set | base64 |
 
-- CSV has the same columns in the same order, with a header line; absent values are empty.
+- CSV has the same columns in the same order, with a header line; absent values are empty. The column names are unchanged from phase 1, so a consumer reading MP4 output keeps working and FLV and MPEG-TS fill the same columns; only `timescale` differs, 1000 for FLV and 90000 for MPEG-TS against the MP4 track timescale.
+- The three container readers go through one emit loop over `container.Sample`, with `Framing.H264()` giving the format for the marker scan. Annex B keeps its own loop, because it has an access-unit index and no timing.
 - A decode error in one access unit is a warning on stderr with the index and the error, and processing continues. Exit code 0 when the file was processed to the end, 1 when it could not be opened or read, 2 for usage errors, which includes an input whose format cannot be told from its first bytes. `-h` prints the flags and exits 0. Warnings do not change the exit code in phase 1.
 
 ## Test vectors
@@ -153,13 +225,16 @@ vectors/
   streams/testsrc-marked.h264      Annex B fixture with a marker before the first VCL NAL unit of every access unit
   streams/testsrc-marked.mp4       the same, remuxed with ffmpeg -c copy, progressive
   streams/testsrc-marked-frag.mp4  the same, fragmented
+  streams/testsrc-marked.flv       the same, remuxed with ffmpeg -c copy
+  streams/testsrc-marked.ts        the same, remuxed with ffmpeg -c copy
   streams/*.jsonl                  expected `seimark dump -out jsonl` output for each stream fixture
   gen/                             how the fixtures were produced: a shell script for ffmpeg and a small Go program for the insertion
 ```
 
 - `markers/001-spec-example` and `nal/001-spec-example` are the worked example from `docs/format.md`.
 - Negative vectors cover: unsupported version, truncated body, payload flag set without a length, payload length beyond the body.
-- The stream fixtures are generated once and committed. The generator uses `marker.Encode` and mp4ff `avc.CreateSEINalu` and inserts the NAL unit before the first VCL NAL unit; in phase 2 the writer replaces that insertion code and the generator calls the writer instead. Fixtures stay under 100 kB each: `testsrc` at 160x120, 10 frames per second, two seconds, keyframe every ten frames.
+- The stream fixtures are generated once and committed. The generator uses `marker.Encode` and mp4ff `avc.CreateSEINalu` and inserts the NAL unit before the first VCL NAL unit; in phase 2 the writer replaced that insertion code and the generator calls the writer instead. Fixtures stay under 100 kB each: `testsrc` at 160x120, 10 frames per second, two seconds, keyframe every ten frames.
+- The FLV and MPEG-TS fixtures are the same marked Annex B stream remuxed with `ffmpeg -c copy`, so the coded bytes and therefore the markers are identical across all five stream fixtures. That is the point: the same twenty markers must come out of five containers. What differs in the golden output is the timing columns, and the MPEG-TS `au` count, because ffmpeg's TS muxer repeats the parameter sets and the reader syncs from the first IDR.
 - Vectors are never edited to make a test pass.
 
 ## Tests
@@ -167,8 +242,12 @@ vectors/
 - `marker`: table-driven codec tests including every negative vector; round trip after microsecond truncation.
 - `h264`: format detection; NAL splitting in both formats including an overrunning length; `Markers` with foreign SEI before and after a marker, with two markers, with a malformed marker; `AccessUnits` on streams with and without delimiters, with SPS and PPS before an IDR, with a marker before the first VCL NAL unit, and on a stream ending without a trailing start code.
 - `mp4`: sample count, DTS, PTS and sync on the progressive and fragmented fixtures; `ErrNoVideoTrack` on an audio-only file built in the test.
+- `flv`: sample count, DTS, PTS, composition offset and sync on the fixture; SPS and PPS from the sequence header; a non-FLV header is `ErrNotFLV`; an enhanced-RTMP FourCC tag is `ErrNoVideoTrack` naming the FourCC; a tag whose size runs past the end is `ErrMalformedFLV`; a configuration record with a length size of 2 is `ErrMalformedFLV`; audio and script tags are skipped.
+- `ts`: sample count, PTS and DTS on the fixture, with the timestamps of the PES in which each access unit starts; access units before the first IDR are dropped and `Index` starts at 0; a PES without a DTS takes DTS from PTS; a PMT without an H.264 stream is `ErrNoVideoTrack`; truncated packets are `ErrMalformedTS`.
+- `container`: `Framing.H264` maps both values.
 - Golden: every vector file decoded and compared; `seimark dump` output on every stream fixture compared with its `.jsonl`.
-- `Makefile`: `test`, `vet`, `fmt-check`, `build`, all under `CGO_ENABLED=0`; `vectors` regenerates the stream fixtures and needs ffmpeg.
+- Cross-container: the markers `dump` finds in the five stream fixtures are the same twenty, with the same sequences, origin times and stream id. The test compares the marker columns only, since the timing columns are the containers' own.
+- `Makefile`: `test`, `vet`, `lint`, `fmt-check`, `build`, all under `CGO_ENABLED=0`; `vectors` regenerates the stream fixtures and needs ffmpeg.
 
 ## The writer, in `h264` (phase 2)
 
@@ -217,10 +296,10 @@ seimark inject [-start RFC3339|now] [-fps N] [-stream-id HEX16] [-keyframes-only
 ## `seimark nals`
 
 ```
-seimark nals [-format auto|annexb|mp4] FILE
+seimark nals [-format auto|annexb|mp4|flv|ts] FILE
 ```
 
-Text output for debugging, one block per access unit: the unit index and, when the input is MP4, its DTS and PTS; then one line per NAL unit with its type name, size in bytes, and for SEI NAL units the messages found: seimark markers decoded (sequence, origin time, stream id, payload size), other unregistered user data with their UUID in hex, other message types by number. Same format detection and exit codes as `dump`.
+Text output for debugging, one block per access unit: the unit index and, when the input is a container format, its DTS and PTS; then one line per NAL unit with its type name, size in bytes, and for SEI NAL units the messages found: seimark markers decoded (sequence, origin time, stream id, payload size), other unregistered user data with their UUID in hex, other message types by number. Same format detection and exit codes as `dump`, and the same one loop over `container.Sample`.
 
 ## Fixture generator
 
@@ -236,6 +315,12 @@ Text output for debugging, one block per access unit: the unit index and, when t
 - `h264.SEIMessages`: the spec example NAL unit gives one message with a decoded marker; a foreign user-data NAL unit gives one message with a UUID and no marker; a one-byte NAL unit is `ErrUnparsableSEI`.
 - `nals`: the fixture lists 20 units, each with one seimark SEI line, and shows the x264 user data as foreign; the MP4 fixture the same with DTS and PTS; a one-byte SEI NAL unit prints `unparsable` and `dump` agrees that there is no marker.
 
+## Tests, phase 4
+
+- Format detection: each of the five stream fixtures sniffs to its own format; a file of `0x47` bytes with no sync byte at 188 does not sniff as `ts`; a file shorter than the read-ahead does not crash the sniff; an unrecognisable file is a usage error.
+- `dump` and `nals` on the FLV and MPEG-TS fixtures against their golden output, with `-format` given and with `auto`.
+- The mp4 migration: `mp4.VideoSamples` yields `container.Sample` with `FramingLengthPrefixed`, and the existing MP4 golden output is unchanged, which is the proof that the shared type did not alter the emit path.
+
 ## Later phases
 
-The browser package, MISB ST 0604 compatibility, MP4 input and output for `inject`, lazy MP4 reading, HEVC.
+MISB ST 0604 compatibility, MP4 input and output for `inject`, lazy MP4 reading, enhanced-RTMP FLV tags, HEVC.
