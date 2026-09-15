@@ -115,6 +115,7 @@ type Sample struct {
 }
 
 func (f Framing) H264() h264.Format
+func (f Framing) String() string // "length-prefixed" or "annexb", via H264
 ```
 
 - `Framing` is the one field the mp4-only struct did not have: MP4 and FLV store length-prefixed NAL units, MPEG-TS carries Annex B, and a consumer that hardcoded `h264.FormatLengthPrefixed` would silently find no markers in a transport stream. Carrying the framing with the bytes makes the mistake impossible.
@@ -179,11 +180,12 @@ func VideoSamples(r io.Reader) iter.Seq2[container.Sample, error]
 ```
 
 - Demultiplexing is go-astits (ADR 0008): PAT, PMT, packet reassembly and PES header parsing, none of which is specific to this project. Above it, our own code does the two things that are: concatenating the PES payloads of the elementary stream and cutting access units out of the result with the same `h264.AccessUnits` rule the Annex B reader uses. One rule, one implementation, so the three readers cannot disagree about where an access unit begins.
-- **Stream selection.** The first PMT elementary stream whose type is H.264 (0x1B) is read; the rest, audio included, are dropped. No H.264 stream in the first PMT is `ErrNoVideoTrack` naming the stream types that were seen, which matches `mp4.ErrNoVideoTrack`.
+- **Stream selection.** The first PMT elementary stream whose type is H.264 (0x1B) is read; the rest, audio included, are dropped. No H.264 stream in the first PMT is `ErrNoVideoTrack` naming the stream types that were seen, which matches `mp4.ErrNoVideoTrack`; a stream carrying no PMT at all is the same error. Stream types are named by number, because go-astits has no `String` method on `StreamType`.
 - **Sync from the IDR NAL unit.** A recording usually starts mid-stream, so the first access units may be non-IDR pictures referring to frames that are not there and may be missing their parameter sets. Nothing is yielded until an access unit containing an IDR NAL unit (type 5) is seen; from there every access unit is yielded. `Index` counts from 0 at that first IDR, not at the first packet, so the indices in `dump` output are contiguous.
 - **Timing.** The PTS and DTS of a PES packet apply to the access unit that *starts* in that packet. A PES packet can carry more than one access unit and an access unit can span several PES packets, so the rule is: when the cut yields an access unit, it takes the timestamps of the PES packet in which its first byte arrived. An access unit that begins before the first PES with a timestamp, which can only be at the start of a recording, is dropped with the rest of the pre-IDR units. `Timescale` is 90000. A PES without a DTS takes DTS from PTS, which is what `PTS_DTS_flags == 2` means.
 - **Wrapping is not unwrapped.** The 33-bit clock wraps after about 26.5 hours. Timestamps are reported as they appear in the stream, so a recording that crosses a wrap shows a jump. Unwrapping would need a heuristic about how far back a timestamp may legitimately go, and a marker carries its own wall-clock time, which is the answer to the question a jump would otherwise raise. Documented here and in the `ts` package documentation.
 - **Data** is Annex B with four-byte start codes, as `h264.AccessUnits` produces, so `Framing` is `FramingAnnexB`.
+- **Attributing a timestamp needs the payload offset, not a byte count.** `h264.AccessUnits` normalises three-byte start codes to four and drops trailing zeros, so the yielded units are not the same length as the bytes they were cut from: a measured 12-byte input yields 14 bytes of units. Summing the unit lengths to track position in the payload therefore drifts, and a PES boundary lands on the wrong access unit. The reader instead locates each unit's true start by counting its NAL units off the payload's own start codes. A future streaming rewrite must keep that property.
 - A stream that is not MPEG-TS, or whose packets do not align, is `ErrMalformedTS`; go-astits' own errors are wrapped with the context of what was being read.
 
 ## `cmd/seimark dump`
