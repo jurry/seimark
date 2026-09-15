@@ -10,9 +10,10 @@ import (
 const usage = `usage: seimark <command> [flags] FILE
 
 commands:
-  dump    print the markers found in an Annex B stream or an MP4 file
+  dump    print the markers found in an Annex B, MP4, FLV or MPEG-TS stream
   inject  write a marker into every access unit of an Annex B stream
-  nals    list the NAL units of each access unit and the SEI messages in them
+  nals    list the NAL units of each access unit and the SEI messages in them,
+          from an Annex B, MP4, FLV or MPEG-TS stream
 
 Exit codes: 0 success, 1 the file could not be read or parsed, 2 usage error.`
 

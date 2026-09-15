@@ -102,3 +102,29 @@ func TestNalsErrors(t *testing.T) {
 		t.Fatalf("unrecognisable input: exit %d", code)
 	}
 }
+
+func TestNalsReadsFLVAndTS(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"testsrc-marked.flv", "testsrc-marked.ts"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			skipUntilFixtureExists(t, name)
+
+			var out, errOut bytes.Buffer
+			if code := run([]string{"nals", fixturePath(name)}, &out, &errOut); code != 0 {
+				t.Fatalf("exit %d: %s", code, errOut.String())
+			}
+
+			text := out.String()
+
+			if n := strings.Count(text, "\nau ") + 1; n != 20 {
+				t.Fatalf("%d access units, want 20", n)
+			}
+
+			if n := strings.Count(text, "seimark seq="); n != 20 {
+				t.Fatalf("%d seimark lines, want 20", n)
+			}
+		})
+	}
+}

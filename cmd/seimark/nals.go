@@ -7,13 +7,17 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"iter"
 	"os"
 	"strings"
 
 	"github.com/Eyevinn/mp4ff/avc"
 
+	"github.com/jurry/seimark/container"
+	"github.com/jurry/seimark/flv"
 	"github.com/jurry/seimark/h264"
 	"github.com/jurry/seimark/mp4"
+	"github.com/jurry/seimark/ts"
 )
 
 // originTimeLayout is RFC 3339 with six fractional digits, as dump and nals
@@ -26,7 +30,7 @@ func parseNalsFlags(args []string, stderr io.Writer) (format, path string, exitC
 	fs := flag.NewFlagSet("nals", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
-	f := fs.String("format", formatAuto, "input format: auto, annexb or mp4")
+	f := fs.String("format", formatAuto, "input format: auto, annexb, mp4, flv or ts")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -42,8 +46,8 @@ func parseNalsFlags(args []string, stderr io.Writer) (format, path string, exitC
 		return "", "", exitUsage, false
 	}
 
-	if *f != formatAuto && *f != formatAnnexB && *f != formatMP4 {
-		fmt.Fprintf(stderr, "seimark nals: -format must be auto, annexb or mp4, got %q\n", *f)
+	if !knownFormat(*f) {
+		fmt.Fprintf(stderr, "seimark nals: -format must be auto, annexb, mp4, flv or ts, got %q\n", *f)
 
 		return "", "", exitUsage, false
 	}
@@ -88,7 +92,11 @@ func runNals(args []string, stdout, stderr io.Writer) int {
 	case formatAnnexB:
 		walkErr = nalsAnnexB(f, w)
 	case formatMP4:
-		walkErr = nalsMP4(f, w)
+		walkErr = nalsContainer(mp4.VideoSamples(f), w)
+	case formatFLV:
+		walkErr = nalsContainer(flv.VideoSamples(f), w)
+	case formatTS:
+		walkErr = nalsContainer(ts.VideoSamples(f), w)
 	}
 
 	if err := w.Flush(); err != nil {
@@ -126,8 +134,10 @@ func nalsAnnexB(r io.Reader, w io.Writer) error {
 	return nil
 }
 
-func nalsMP4(r io.ReadSeeker, w io.Writer) error {
-	for s, err := range mp4.VideoSamples(r) {
+// nalsContainer prints the samples of one container reader; the three
+// container formats differ only in the sequence passed in.
+func nalsContainer(samples iter.Seq2[container.Sample, error], w io.Writer) error {
+	for s, err := range samples {
 		if err != nil {
 			return err
 		}
