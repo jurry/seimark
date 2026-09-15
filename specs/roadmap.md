@@ -39,18 +39,18 @@ Design in `docs/design/go-library.md` before implementation.
 
 Design in `docs/design/browser-package.md`.
 
-## Phase 4 — FLV and MPEG-TS readers. Now
+## Phase 4 — FLV and MPEG-TS readers. Done
 
 - `flv` package: iterate the video tags of an FLV file: parameter sets from the AVC sequence header, one sample per AVC video packet with DTS, composition offset and keyframe flag, data as length-prefixed NAL units.
 - `ts` package: demultiplex the first H.264 elementary stream of an MPEG-TS file: PAT and PMT, PES with PTS and DTS, access units cut from the payload with the `h264.AccessUnits` rule, data as Annex B, sync from the IDR NAL unit.
-- The same sample shape as `mp4`, so a consumer reads the three containers alike.
+- The same sample shape as `mp4`: a shared `container.Sample` with a framing field, so a consumer reads the three containers alike.
 - `seimark dump` and `seimark nals` read both, format detected from content: the `FLV` signature, a sync byte at offsets 0 and 188.
 - Vectors: the marked Annex B fixture remuxed with `-c copy` into FLV and MPEG-TS, with golden `dump` output for each.
 - Why now: SRS records FLV and MediaMTX records MPEG-TS, and the sibling project that measures servers reads recordings only through this library.
 
 Design in `docs/design/go-library.md`.
 
-## Phase 5 — MISB ST 0604 compatibility
+## Phase 5 — MISB ST 0604 compatibility. Now
 
 - Emit the MISB precision time stamp message alongside the marker, read it where present.
 - Conformance check against GStreamer's h264parse and FFmpeg.
