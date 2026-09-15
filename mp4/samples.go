@@ -10,17 +10,9 @@ import (
 	"strings"
 
 	"github.com/Eyevinn/mp4ff/mp4"
-)
 
-// Sample is one video sample with its timing in the track timescale.
-type Sample struct {
-	Index     int
-	DTS       uint64
-	PTS       int64
-	Timescale uint32
-	Sync      bool
-	Data      []byte
-}
+	"github.com/jurry/seimark/container"
+)
 
 var (
 	// ErrNoVideoTrack is returned when no track qualifies as an H.264 video track.
@@ -32,12 +24,13 @@ var (
 )
 
 // VideoSamples yields the samples of the first H.264 video track. The file is
-// read into memory; PTS honours the first edit-list entry only.
-func VideoSamples(r io.ReadSeeker) iter.Seq2[Sample, error] {
-	return func(yield func(Sample, error) bool) {
+// read into memory; PTS honours the first edit-list entry only. Framing is
+// always FramingLengthPrefixed.
+func VideoSamples(r io.ReadSeeker) iter.Seq2[container.Sample, error] {
+	return func(yield func(container.Sample, error) bool) {
 		f, err := mp4.DecodeFile(r)
 		if err != nil {
-			yield(Sample{}, fmt.Errorf("seimark: decode mp4: %w", err))
+			yield(container.Sample{}, fmt.Errorf("seimark: decode mp4: %w", err))
 
 			return
 		}
@@ -48,20 +41,20 @@ func VideoSamples(r io.ReadSeeker) iter.Seq2[Sample, error] {
 		}
 
 		if moov == nil {
-			yield(Sample{}, fmt.Errorf("%w: no moov box", ErrNoVideoTrack))
+			yield(container.Sample{}, fmt.Errorf("%w: no moov box", ErrNoVideoTrack))
 
 			return
 		}
 
 		trak, err := h264Track(moov)
 		if err != nil {
-			yield(Sample{}, err)
+			yield(container.Sample{}, err)
 
 			return
 		}
 
 		if err := checkTrackBoxes(trak); err != nil {
-			yield(Sample{}, err)
+			yield(container.Sample{}, err)
 
 			return
 		}
@@ -161,16 +154,16 @@ func editListOffset(moov *mp4.MoovBox, trak *mp4.TrakBox) int64 {
 	return 0
 }
 
-func progressiveSamples(f *mp4.File, trak *mp4.TrakBox, timescale uint32, editOffset int64, yield func(Sample, error) bool) {
+func progressiveSamples(f *mp4.File, trak *mp4.TrakBox, timescale uint32, editOffset int64, yield func(container.Sample, error) bool) {
 	stbl := trak.Mdia.Minf.Stbl
 	if f.Mdat == nil || stbl.Stsz == nil || stbl.Stsc == nil || stbl.Stts == nil {
-		yield(Sample{}, fmt.Errorf("%w: sample tables incomplete", ErrNoVideoTrack))
+		yield(container.Sample{}, fmt.Errorf("%w: sample tables incomplete", ErrNoVideoTrack))
 
 		return
 	}
 
 	if err := validateTables(stbl); err != nil {
-		yield(Sample{}, err)
+		yield(container.Sample{}, err)
 
 		return
 	}
@@ -179,7 +172,7 @@ func progressiveSamples(f *mp4.File, trak *mp4.TrakBox, timescale uint32, editOf
 	for nr := uint32(1); nr <= n; nr++ {
 		s, err := progressiveSample(f, stbl, nr, timescale, editOffset)
 		if err != nil {
-			yield(Sample{}, err)
+			yield(container.Sample{}, err)
 
 			return
 		}
@@ -195,21 +188,21 @@ func progressiveSamples(f *mp4.File, trak *mp4.TrakBox, timescale uint32, editOf
 // panics there; recover turns that into an error rather than a crash.
 func progressiveSample(
 	f *mp4.File, stbl *mp4.StblBox, nr uint32, timescale uint32, editOffset int64,
-) (s Sample, err error) {
+) (s container.Sample, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			s, err = Sample{}, fmt.Errorf("%w: sample %d: %v", ErrMalformedFile, nr, r)
+			s, err = container.Sample{}, fmt.Errorf("%w: sample %d: %v", ErrMalformedFile, nr, r)
 		}
 	}()
 
 	chunkNr, firstInChunk, err := stbl.Stsc.ChunkNrFromSampleNr(int(nr))
 	if err != nil {
-		return Sample{}, fmt.Errorf("seimark: sample %d: %w", nr, err)
+		return container.Sample{}, fmt.Errorf("seimark: sample %d: %w", nr, err)
 	}
 
 	offset, err := chunkOffset(stbl, chunkNr)
 	if err != nil {
-		return Sample{}, err
+		return container.Sample{}, err
 	}
 
 	for i := firstInChunk; i < int(nr); i++ {
@@ -220,12 +213,12 @@ func progressiveSample(
 
 	data, err := sampleData(f.Mdat, offset, int64(size))
 	if err != nil {
-		return Sample{}, fmt.Errorf("seimark: sample %d data: %w", nr, err)
+		return container.Sample{}, fmt.Errorf("seimark: sample %d data: %w", nr, err)
 	}
 
 	dts, _ := stbl.Stts.GetDecodeTime(nr)
 	if dts > math.MaxInt64 {
-		return Sample{}, fmt.Errorf("seimark: sample %d: decode time %d overflows int64", nr, dts)
+		return container.Sample{}, fmt.Errorf("seimark: sample %d: decode time %d overflows int64", nr, dts)
 	}
 
 	var cto int32
@@ -235,7 +228,7 @@ func progressiveSample(
 
 	sync := stbl.Stss == nil || stbl.Stss.IsSyncSample(nr)
 
-	return Sample{
+	return container.Sample{
 		Index: int(nr) - 1, DTS: dts, PTS: int64(dts) + int64(cto) + editOffset,
 		Timescale: timescale, Sync: sync, Data: data,
 	}, nil
@@ -338,7 +331,7 @@ func chunkOffset(stbl *mp4.StblBox, chunkNr int) (int64, error) {
 }
 
 func fragmentedSamples(
-	f *mp4.File, moov *mp4.MoovBox, trak *mp4.TrakBox, timescale uint32, editOffset int64, yield func(Sample, error) bool,
+	f *mp4.File, moov *mp4.MoovBox, trak *mp4.TrakBox, timescale uint32, editOffset int64, yield func(container.Sample, error) bool,
 ) {
 	var trex *mp4.TrexBox
 	if moov.Mvex != nil {
@@ -350,14 +343,14 @@ func fragmentedSamples(
 	for _, seg := range f.Segments {
 		for _, frag := range seg.Fragments {
 			if frag.Moof == nil || frag.Mdat == nil {
-				yield(Sample{}, fmt.Errorf("%w: fragment without mdat", ErrMalformedFile))
+				yield(container.Sample{}, fmt.Errorf("%w: fragment without mdat", ErrMalformedFile))
 
 				return
 			}
 
 			samples, err := frag.GetFullSamples(trex)
 			if err != nil {
-				yield(Sample{}, fmt.Errorf("seimark: fragment samples: %w", err))
+				yield(container.Sample{}, fmt.Errorf("seimark: fragment samples: %w", err))
 
 				return
 			}
@@ -365,7 +358,7 @@ func fragmentedSamples(
 			for i := range samples {
 				fs := &samples[i]
 
-				s := Sample{
+				s := container.Sample{
 					Index: index, DTS: fs.DecodeTime, PTS: fs.PresentationTime() + editOffset,
 					Timescale: timescale, Sync: !mp4.DecodeSampleFlags(fs.Flags).SampleIsNonSync, Data: fs.Data,
 				}

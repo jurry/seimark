@@ -11,6 +11,7 @@ import (
 
 	"github.com/Eyevinn/mp4ff/mp4"
 
+	"github.com/jurry/seimark/container"
 	"github.com/jurry/seimark/h264"
 )
 
@@ -27,10 +28,10 @@ func openFixture(t *testing.T, name string) *os.File {
 	return f
 }
 
-func collect(t *testing.T, name string) []Sample {
+func collect(t *testing.T, name string) []container.Sample {
 	t.Helper()
 
-	var out []Sample
+	var out []container.Sample
 
 	for s, err := range VideoSamples(openFixture(t, name)) {
 		if err != nil {
@@ -43,7 +44,7 @@ func collect(t *testing.T, name string) []Sample {
 	return out
 }
 
-func checkFixture(t *testing.T, samples []Sample) {
+func checkFixture(t *testing.T, samples []container.Sample) {
 	t.Helper()
 
 	if len(samples) != 20 {
@@ -70,6 +71,10 @@ func checkFixture(t *testing.T, samples []Sample) {
 		wantSync := i%10 == 0
 		if s.Sync != wantSync {
 			t.Errorf("sample %d: Sync = %v, want %v", i, s.Sync, wantSync)
+		}
+
+		if s.Framing != container.FramingLengthPrefixed {
+			t.Errorf("sample %d: Framing = %v", i, s.Framing)
 		}
 
 		ms, err := h264.Markers(s.Data, h264.FormatLengthPrefixed)

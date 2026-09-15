@@ -134,7 +134,7 @@ func nalsMP4(r io.ReadSeeker, w io.Writer) error {
 
 		fmt.Fprintf(w, "au %d dts %d pts %d\n", s.Index, s.DTS, s.PTS)
 
-		if err := printNALUnits(w, s.Data, h264.FormatLengthPrefixed); err != nil {
+		if err := printNALUnits(w, s.Data, s.Framing.H264()); err != nil {
 			return err
 		}
 	}

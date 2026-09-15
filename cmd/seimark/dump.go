@@ -223,7 +223,7 @@ func dumpMP4(r io.ReadSeeker, w *recordWriter, all bool, warn func(int, error)) 
 		dts, pts, ts, sync := s.DTS, s.PTS, s.Timescale, s.Sync
 		t := float64(pts) / float64(ts)
 		base := record{AU: s.Index, DTS: &dts, PTS: &pts, Timescale: &ts, Sync: &sync, Time: &t}
-		emit(w, &base, s.Data, h264.FormatLengthPrefixed, all, warn)
+		emit(w, &base, s.Data, s.Framing.H264(), all, warn)
 	}
 
 	return nil
