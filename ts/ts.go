@@ -163,7 +163,6 @@ func demux(r io.Reader) (payloads []byte, boundaries []pes, truncated bool, err 
 // count that is not a multiple of this is how truncation is seen at all.
 const packetSize = 188
 
-// countingReader counts the bytes the demultiplexer consumed.
 type countingReader struct {
 	r io.Reader
 	n int64
@@ -177,7 +176,6 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// h264PID returns the PID of the first H.264 elementary stream in the PMT.
 func h264PID(pmt *astits.PMTData) (uint16, error) {
 	seen := make([]string, 0, len(pmt.ElementaryStreams))
 
