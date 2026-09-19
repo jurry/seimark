@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -357,5 +358,131 @@ func TestFirstH264StreamIsChosen(t *testing.T) {
 
 	if len(got) != 1 {
 		t.Fatalf("got %d samples, want 1", len(got))
+	}
+}
+
+// dtsOf returns the DTS of every sample, which is what timestamp attribution
+// gets wrong when the payload offset of an access unit drifts.
+func dtsOf(samples []container.Sample) []uint64 {
+	out := make([]uint64, 0, len(samples))
+	for _, s := range samples {
+		out = append(out, s.DTS)
+	}
+
+	return out
+}
+
+func TestTimestampsSurvivePaddingAndShortStartCodes(t *testing.T) {
+	t.Parallel()
+
+	// threeByte re-frames an access unit with three-byte start codes.
+	threeByte := func(au []byte) []byte {
+		return bytes.ReplaceAll(au, []byte{0, 0, 0, 1}, []byte{0, 0, 1})
+	}
+
+	for _, tc := range []struct {
+		name    string
+		packets []pesSpec
+		want    []uint64
+	}{
+		{
+			name: "bare start code between NAL units",
+			packets: []pesSpec{
+				{payload: append(aud(), append([]byte{0, 0, 0, 1}, slice(0x05)...)...), indicator: astits.PTSDTSIndicatorBothPresent, pts: 9000, dts: 6000},
+				{payload: accessUnit(0x01), indicator: astits.PTSDTSIndicatorBothPresent, pts: 27000, dts: 15000},
+			},
+			want: []uint64{6000, 15000},
+		},
+		{
+			// A three-byte start code directly after a four-byte one, which
+			// widens by a byte and so shifts every later offset.
+			name: "back-to-back start codes",
+			packets: []pesSpec{
+				{payload: append(aud(), append([]byte{0, 0, 1, 0x06, 0x00, 0x80}, slice(0x05)...)...), indicator: astits.PTSDTSIndicatorBothPresent, pts: 9000, dts: 6000},
+				{payload: accessUnit(0x01), indicator: astits.PTSDTSIndicatorBothPresent, pts: 27000, dts: 15000},
+				{payload: accessUnit(0x01), indicator: astits.PTSDTSIndicatorBothPresent, pts: 36000, dts: 24000},
+			},
+			want: []uint64{6000, 15000, 24000},
+		},
+		{
+			name: "three-byte start codes",
+			packets: []pesSpec{
+				{payload: threeByte(accessUnit(0x05)), indicator: astits.PTSDTSIndicatorBothPresent, pts: 9000, dts: 6000},
+				{payload: threeByte(accessUnit(0x01)), indicator: astits.PTSDTSIndicatorBothPresent, pts: 27000, dts: 15000},
+				{payload: threeByte(accessUnit(0x01)), indicator: astits.PTSDTSIndicatorBothPresent, pts: 36000, dts: 24000},
+			},
+			want: []uint64{6000, 15000, 24000},
+		},
+		{
+			name: "access unit spanning two PES packets",
+			packets: []pesSpec{
+				{payload: aud(), indicator: astits.PTSDTSIndicatorBothPresent, pts: 9000, dts: 6000},
+				{payload: slice(0x05), indicator: astits.PTSDTSIndicatorBothPresent, pts: 27000, dts: 15000},
+				{payload: accessUnit(0x01), indicator: astits.PTSDTSIndicatorBothPresent, pts: 36000, dts: 24000},
+			},
+			// The split unit takes the timestamps of the PES its first byte arrived in.
+			want: []uint64{6000, 24000},
+		},
+		{
+			name: "two access units in one PES",
+			packets: []pesSpec{
+				{payload: append(accessUnit(0x05), accessUnit(0x01)...), indicator: astits.PTSDTSIndicatorBothPresent, pts: 9000, dts: 6000},
+				{payload: accessUnit(0x01), indicator: astits.PTSDTSIndicatorBothPresent, pts: 36000, dts: 24000},
+			},
+			want: []uint64{6000, 6000, 24000},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			b := mux(t, []*astits.PMTElementaryStream{h264Stream()}, videoPID, tc.packets)
+
+			got, err := collect(t, b)
+			if err != nil {
+				t.Fatalf("VideoSamples: %v", err)
+			}
+
+			if dts := dtsOf(got); !slices.Equal(dts, tc.want) {
+				t.Errorf("DTS = %v, want %v", dts, tc.want)
+			}
+		})
+	}
+}
+
+func TestTruncatedStreamIsMalformed(t *testing.T) {
+	t.Parallel()
+
+	b, err := os.ReadFile(filepath.Join("..", "vectors", "streams", "testsrc-marked.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := collect(t, b[:len(b)-100])
+	if !errors.Is(err, ErrMalformedTS) {
+		t.Fatalf("err = %v, want ErrMalformedTS", err)
+	}
+
+	if len(got) == 0 {
+		t.Error("no samples were yielded before the error")
+	}
+
+	if len(got) > 20 {
+		t.Errorf("got %d samples, more than the whole stream's 20", len(got))
+	}
+}
+
+// TestContainsIDRReturnsItsSplitError pins the contract that a unit which does
+// not split is an error rather than a silently non-sync unit. Annex B splitting
+// cannot currently fail, so the error is checked on the format that can.
+func TestContainsIDRReturnsItsSplitError(t *testing.T) {
+	t.Parallel()
+
+	if _, err := h264.NALUnits([]byte{0, 0, 0, 0}, h264.FormatLengthPrefixed); err == nil {
+		t.Fatal("a zero length prefix should not split")
+	}
+
+	sync, err := containsIDR(accessUnit(0x05))
+	if err != nil || !sync {
+		t.Fatalf("containsIDR(IDR unit) = %v, %v; want true, nil", sync, err)
 	}
 }

@@ -1,9 +1,15 @@
 // Package ts iterates the H.264 access units of an MPEG-TS stream. The 33-bit
 // PTS and DTS clock is reported as it appears in the stream and is never
 // unwrapped, so a recording crossing the roughly 26.5-hour wrap shows a jump.
+//
+// An access unit starting in a PES packet that carries no timestamps is given a
+// DTS and a PTS of zero, because the stream states no other time for it. Video
+// packets arriving before the first PMT are dropped, since until the PMT is read
+// there is no way to tell which PID carries the video.
 package ts
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -53,7 +59,7 @@ type pes struct {
 // access unit containing an IDR NAL unit, and Framing is always FramingAnnexB.
 func VideoSamples(r io.Reader) iter.Seq2[container.Sample, error] {
 	return func(yield func(container.Sample, error) bool) {
-		payload, packets, err := demux(r)
+		payload, packets, truncated, err := demux(r)
 		if err != nil {
 			yield(container.Sample{}, err)
 
@@ -62,31 +68,33 @@ func VideoSamples(r io.Reader) iter.Seq2[container.Sample, error] {
 
 		index := 0
 		synced := false
-		cursor := 0
 
-		for unit, err := range h264.AccessUnits(bytes.NewReader(payload)) {
+		for unit, err := range h264.AccessUnitsAt(bytes.NewReader(payload)) {
 			if err != nil {
-				yield(container.Sample{}, fmt.Errorf("%w: cut access unit at byte %d: %w", ErrMalformedTS, cursor, err))
+				yield(container.Sample{}, fmt.Errorf("%w: cut access unit at byte %d: %w", ErrMalformedTS, unit.Offset, err))
 
 				return
 			}
 
-			start := nextStartCode(payload, cursor)
-			cursor = advance(payload, start, unit)
+			sync, err := containsIDR(unit.Bytes)
+			if err != nil {
+				yield(container.Sample{}, fmt.Errorf("%w: access unit at byte %d: %w", ErrMalformedTS, unit.Offset, err))
 
-			sync := containsIDR(unit)
+				return
+			}
+
 			if !synced && !sync {
 				continue
 			}
 
 			synced = true
 
-			p := timestampsAt(packets, start)
+			p := timestampsAt(packets, unit.Offset)
 
 			s := container.Sample{
 				Index: index, DTS: p.dts, PTS: p.pts,
 				Timescale: Timescale, Sync: sync,
-				Framing: container.FramingAnnexB, Data: unit,
+				Framing: container.FramingAnnexB, Data: unit.Bytes,
 			}
 			if !yield(s, nil) {
 				return
@@ -94,13 +102,21 @@ func VideoSamples(r io.Reader) iter.Seq2[container.Sample, error] {
 
 			index++
 		}
+
+		if truncated {
+			yield(container.Sample{}, fmt.Errorf("%w: the stream ends inside a packet", ErrMalformedTS))
+		}
 	}
 }
 
 // demux runs the demultiplexer to completion, returning the concatenated
-// payloads of the first H.264 elementary stream and where each PES began in them.
-func demux(r io.Reader) ([]byte, []pes, error) {
-	d := astits.NewDemuxer(context.Background(), r)
+// payloads of the first H.264 elementary stream, where each PES began in them,
+// and whether the stream ended inside a packet.
+func demux(r io.Reader) (payloads []byte, boundaries []pes, truncated bool, err error) {
+	// go-astits peeks a bufio.Reader to detect the packet size and rewinds or
+	// re-syncs anything else, which a counting wrapper would break.
+	counter := &countingReader{r: r}
+	d := astits.NewDemuxer(context.Background(), bufio.NewReader(counter))
 
 	var (
 		payload []byte
@@ -116,12 +132,12 @@ func demux(r io.Reader) ([]byte, []pes, error) {
 		}
 
 		if err != nil {
-			return nil, nil, fmt.Errorf("%w: read packet: %w", ErrMalformedTS, err)
+			return nil, nil, false, fmt.Errorf("%w: read packet: %w", ErrMalformedTS, err)
 		}
 
 		if data.PMT != nil && !found {
 			if pid, err = h264PID(data.PMT); err != nil {
-				return nil, nil, err
+				return nil, nil, false, err
 			}
 
 			found = true
@@ -136,10 +152,29 @@ func demux(r io.Reader) ([]byte, []pes, error) {
 	}
 
 	if !found {
-		return nil, nil, fmt.Errorf("%w: no PMT in the stream", ErrNoVideoTrack)
+		return nil, nil, false, fmt.Errorf("%w: no PMT in the stream", ErrNoVideoTrack)
 	}
 
-	return payload, packets, nil
+	return payload, packets, counter.n%packetSize != 0, nil
+}
+
+// packetSize is the MPEG-TS packet length. go-astits reads whole packets and
+// reports a partial trailing one as the ordinary end of the stream, so a byte
+// count that is not a multiple of this is how truncation is seen at all.
+const packetSize = 188
+
+// countingReader counts the bytes the demultiplexer consumed.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+
+	//nolint:wrapcheck // go-astits compares this error with io.EOF, so it must pass through unchanged.
+	return n, err
 }
 
 // h264PID returns the PID of the first H.264 elementary stream in the PMT.
@@ -194,45 +229,6 @@ func pts(p *astits.PESData) int64 {
 	return h.PTS.Base
 }
 
-// startCode is the three-byte Annex B prefix; a four-byte start code ends with it.
-func startCode() []byte {
-	return []byte{0, 0, 1}
-}
-
-// nextStartCode returns the offset in payload of the first start code at or
-// after cursor, which is where the next access unit begins.
-func nextStartCode(payload []byte, cursor int) int {
-	if cursor >= len(payload) {
-		return len(payload)
-	}
-
-	at := bytes.Index(payload[cursor:], startCode())
-	if at < 0 {
-		return len(payload)
-	}
-
-	return cursor + at
-}
-
-// advance steps past the NAL units that unit was cut from, leaving the cursor
-// inside the last one. h264.AccessUnits normalises three-byte start codes to
-// four and drops trailing zeros, so the unit's own length is not what it
-// consumed in payload; counting its NAL units off payload's start codes is.
-func advance(payload []byte, start int, unit []byte) int {
-	units, err := h264.NALUnits(unit, h264.FormatAnnexB)
-	if err != nil {
-		return len(payload)
-	}
-
-	cursor := start
-
-	for range units {
-		cursor = nextStartCode(payload, cursor) + len(startCode())
-	}
-
-	return cursor
-}
-
 // timestampsAt returns the PES packet in which the byte at start arrived.
 func timestampsAt(packets []pes, start int) pes {
 	if len(packets) == 0 {
@@ -247,17 +243,19 @@ func timestampsAt(packets []pes, start int) pes {
 	return packets[i-1]
 }
 
-func containsIDR(unit []byte) bool {
+// containsIDR reports whether the access unit holds an IDR NAL unit, which is
+// where yielding starts; a unit that does not split is an error, not a non-sync unit.
+func containsIDR(unit []byte) (bool, error) {
 	units, err := h264.NALUnits(unit, h264.FormatAnnexB)
 	if err != nil {
-		return false
+		return false, fmt.Errorf("split NAL units: %w", err)
 	}
 
 	for _, n := range units {
 		if len(n) > 0 && n[0]&naluTypeMask == naluTypeIDR {
-			return true
+			return true, nil
 		}
 	}
 
-	return false
+	return false, nil
 }
