@@ -1,4 +1,8 @@
 // Package flv iterates the AVC video tags of an FLV stream.
+//
+// Only the first SPS and the first PPS of the configuration record are kept.
+// A tag body is allocated at its declared size before it is read, which the
+// 24-bit size field bounds at 16 MiB.
 package flv
 
 import (
@@ -138,7 +142,7 @@ func (s *Stream) Samples() iter.Seq2[container.Sample, error] {
 		index := 0
 
 		for {
-			tagType, ts, data, err := s.nextTag()
+			tagType, ts, data, tagOffset, err := s.nextTag()
 			if errors.Is(err, io.EOF) {
 				return
 			}
@@ -153,7 +157,7 @@ func (s *Stream) Samples() iter.Seq2[container.Sample, error] {
 				continue
 			}
 
-			sample, ok, err := s.videoSample(ts, data, index)
+			sample, ok, err := s.videoSample(ts, data, index, tagOffset)
 			if err != nil {
 				yield(container.Sample{}, err)
 
@@ -173,28 +177,28 @@ func (s *Stream) Samples() iter.Seq2[container.Sample, error] {
 	}
 }
 
-// nextTag reads one tag. A clean end of stream at a tag boundary is io.EOF.
-func (s *Stream) nextTag() (tagType byte, ts uint32, data []byte, err error) {
+func (s *Stream) nextTag() (tagType byte, ts uint32, data []byte, tagOffset int64, err error) {
 	// A well-formed stream ends with the previous-tag size of the last tag and
-	// nothing after it, so io.EOF here is the clean end of the tag list.
+	// nothing after it, so a zero-byte read at either tag-boundary field is the
+	// clean end of the tag list. Inside a tag body it is truncation.
 	if _, err := io.ReadFull(s.r, make([]byte, prevTagSize)); err != nil {
 		if errors.Is(err, io.EOF) {
-			return 0, 0, nil, io.EOF
+			return 0, 0, nil, 0, io.EOF
 		}
 
-		return 0, 0, nil, fmt.Errorf("%w: previous-tag size at offset %d: %w", ErrMalformedFLV, s.offset, err)
+		return 0, 0, nil, 0, fmt.Errorf("%w: previous-tag size at offset %d: %w", ErrMalformedFLV, s.offset, err)
 	}
 
 	s.offset += prevTagSize
-	tagOffset := s.offset
+	tagOffset = s.offset
 
 	h := make([]byte, tagHeaderSize)
 	if _, err := io.ReadFull(s.r, h); err != nil {
 		if errors.Is(err, io.EOF) {
-			return 0, 0, nil, io.EOF
+			return 0, 0, nil, 0, io.EOF
 		}
 
-		return 0, 0, nil, fmt.Errorf("%w: tag header at offset %d: %w", ErrMalformedFLV, tagOffset, err)
+		return 0, 0, nil, 0, fmt.Errorf("%w: tag header at offset %d: %w", ErrMalformedFLV, tagOffset, err)
 	}
 
 	s.offset += tagHeaderSize
@@ -204,20 +208,26 @@ func (s *Stream) nextTag() (tagType byte, ts uint32, data []byte, err error) {
 
 	data = make([]byte, size)
 	if _, err := io.ReadFull(s.r, data); err != nil {
-		return 0, 0, nil, fmt.Errorf("%w: tag of %d bytes at offset %d: %w", ErrMalformedFLV, size, tagOffset, err)
+		// io.EOF is reported as ErrUnexpectedEOF: wrapping it unchanged would let
+		// Samples read a truncated body as the clean end of the tag list.
+		if errors.Is(err, io.EOF) {
+			err = io.ErrUnexpectedEOF
+		}
+
+		return 0, 0, nil, 0, fmt.Errorf("%w: tag of %d bytes at offset %d: %w", ErrMalformedFLV, size, tagOffset, err)
 	}
 
 	s.offset += int64(size)
 
-	return tagType, ts, data, nil
+	return tagType, ts, data, tagOffset, nil
 }
 
 // videoSample turns one video tag into a sample. ok is false for the tags that
 // carry no picture: the sequence header and the end of sequence.
-func (s *Stream) videoSample(ts uint32, data []byte, index int) (container.Sample, bool, error) {
+func (s *Stream) videoSample(ts uint32, data []byte, index int, tagOffset int64) (container.Sample, bool, error) {
 	if len(data) < avcHeaderSize {
 		return container.Sample{}, false, fmt.Errorf(
-			"%w: video tag of %d bytes at offset %d", ErrMalformedFLV, len(data), s.offset,
+			"%w: video tag of %d bytes at offset %d", ErrMalformedFLV, len(data), tagOffset,
 		)
 	}
 
@@ -245,7 +255,7 @@ func (s *Stream) videoSample(ts uint32, data []byte, index int) (container.Sampl
 
 	if s.lengthSize == 0 {
 		return container.Sample{}, false, fmt.Errorf(
-			"%w: NAL unit tag at offset %d before any sequence header", ErrMalformedFLV, s.offset,
+			"%w: NAL unit tag at offset %d before any sequence header", ErrMalformedFLV, tagOffset,
 		)
 	}
 
@@ -260,7 +270,6 @@ func (s *Stream) videoSample(ts uint32, data []byte, index int) (container.Sampl
 	}, true, nil
 }
 
-// compositionOffset sign-extends the 24-bit offset the tag carries.
 func compositionOffset(b []byte) int32 {
 	v := int32(b[0])<<16 | int32(b[1])<<8 | int32(b[2])
 	if b[0]&0x80 != 0 {
@@ -270,7 +279,8 @@ func compositionOffset(b []byte) int32 {
 	return v
 }
 
-// readConfigurationRecord keeps the parameter sets and the NAL length size.
+// readConfigurationRecord keeps the first SPS and the first PPS of the record,
+// which is all a consumer of this reader needs.
 func (s *Stream) readConfigurationRecord(rec []byte) error {
 	if len(rec) <= configSPSCountOffset {
 		return fmt.Errorf("%w: configuration record of %d bytes", ErrMalformedFLV, len(rec))
@@ -310,7 +320,6 @@ func (s *Stream) readConfigurationRecord(rec []byte) error {
 	return nil
 }
 
-// parameterSets reads count two-byte-length-prefixed sets and returns the rest.
 func parameterSets(b []byte, count int) (sets [][]byte, rest []byte, err error) {
 	sets = make([][]byte, 0, count)
 
@@ -333,7 +342,6 @@ func parameterSets(b []byte, count int) (sets [][]byte, rest []byte, err error) 
 	return sets, b, nil
 }
 
-// discard skips n bytes of a header longer than the nine this reader knows.
 func (s *Stream) discard(n int64) error {
 	skipped, err := io.CopyN(io.Discard, s.r, n)
 	s.offset += skipped

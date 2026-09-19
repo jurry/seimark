@@ -353,3 +353,64 @@ func TestNALTagBeforeSequenceHeaderIsMalformed(t *testing.T) {
 		t.Errorf("err = %v, want ErrMalformedFLV", err)
 	}
 }
+
+func TestTagHeaderWithNoBodyIsMalformed(t *testing.T) {
+	t.Parallel()
+
+	in := header()
+	in = append(in, seqHeader([]byte{0x67}, []byte{0x68}, 4)...)
+	in = append(in, videoTag(0, 1, 1, 0, nalPayload([]byte{0x65}))...)
+	in = append(in, tagTypeVideo, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0)
+
+	samples, err := collect(t, in)
+	if len(samples) != 1 {
+		t.Fatalf("got %d samples, want 1", len(samples))
+	}
+
+	if !errors.Is(err, ErrMalformedFLV) {
+		t.Fatalf("err = %v, want ErrMalformedFLV", err)
+	}
+
+	if !strings.Contains(err.Error(), "offset") {
+		t.Errorf("err = %v, want it to name an offset", err)
+	}
+}
+
+func TestStrayBytesAfterLastTagAreMalformed(t *testing.T) {
+	t.Parallel()
+
+	in := header()
+	in = append(in, seqHeader([]byte{0x67}, []byte{0x68}, 4)...)
+	full := videoTag(0, 1, 1, 0, nalPayload([]byte{0x65}))
+	in = append(in, full[:len(full)-prevTagSize]...)
+	in = append(in, 0x00, 0x00)
+
+	samples, err := collect(t, in)
+	if len(samples) != 1 {
+		t.Fatalf("got %d samples, want 1", len(samples))
+	}
+
+	if !errors.Is(err, ErrMalformedFLV) {
+		t.Fatalf("err = %v, want ErrMalformedFLV", err)
+	}
+
+	if !strings.Contains(err.Error(), "previous-tag size at offset 67") {
+		t.Errorf("err = %v, want it to name the previous-tag size field at offset 67", err)
+	}
+}
+
+func TestShortVideoTagNamesTheTagOffset(t *testing.T) {
+	t.Parallel()
+
+	in := header()
+	in = append(in, tag(tagTypeVideo, 0, []byte{0x17, 0x01})...)
+
+	_, err := collect(t, in)
+	if !errors.Is(err, ErrMalformedFLV) {
+		t.Fatalf("err = %v, want ErrMalformedFLV", err)
+	}
+
+	if !strings.Contains(err.Error(), "at offset 13") {
+		t.Errorf("err = %v, want it to name offset 13", err)
+	}
+}
