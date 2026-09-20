@@ -2,7 +2,7 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 0.1.0 - unreleased
+## 0.1.0 - 2026-09-20
 
 - Constitution, format specification and ADRs 0001 to 0004 (phase 0).
 - Go library and `seimark dump`: read markers from Annex B streams and MP4,

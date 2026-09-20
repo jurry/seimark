@@ -12,12 +12,8 @@ root, [`../README.md`](../README.md).
 
 ## Install
 
-Not published to npm yet, so `npm install seimark` will not resolve; it will
-once published. Until then, clone the repository and run
-`npm install <path>/seimark/browser`, or from inside another project:
-
 ```sh
-npm install ../seimark/browser
+npm install seimark
 ```
 
 ESM only. Node 22 or later for the tooling; the package itself has no runtime
