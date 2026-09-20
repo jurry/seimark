@@ -74,13 +74,24 @@ SEI.
 ```js
 import { reader } from 'seimark/webrtc';
 
-pc.addEventListener('track', (e) => {
-  const rh = reader(e.receiver, (m) => {
-    console.log(m.sequence, m.originTimeUs, m.timeSource);
-  });
-  // rh.stats has framesSeen, markersFound, gaps, duplicates, streams
+// A page that subscribes (WHEP, or any viewer that sends the offer):
+const t = pc.addTransceiver('video', { direction: 'recvonly' });
+const rh = reader(t.receiver, (m) => {
+  console.log(m.sequence, m.originTimeUs, m.timeSource);
 });
+// then createOffer and negotiate; rh.stats has framesSeen, markersFound, gaps, duplicates, streams
+
+// A page that answers an incoming offer may attach in the track event instead:
+pc.addEventListener('track', (e) => reader(e.receiver, onMarker));
 ```
+
+Attach before the local description is set. When the page is the answerer, the
+`track` event fires inside `setRemoteDescription(offer)`, before the answer, so
+attaching there is in time. When the page is the offerer, the event fires
+inside `setRemoteDescription(answer)`, after the local description, and a
+transform set then is never wired: the video decodes and the reader sees
+nothing. Measured 2026-09-20 on Chromium 153 against MediaMTX over WHEP, four
+runs each way.
 
 Gap and duplicate detection is per stream id and wraps with the sequence at
 2^32.
@@ -142,15 +153,35 @@ naming the directive rather than leaving a silent stream that never marks.
 
 ## Demo page
 
-`demo/index.html` publishes a canvas-generated H.264 stream over WHIP and shows
-the stream id, sequence, the time source the probe chose and the last marker as
-they update.
+`demo/index.html` is both ends of the claim on one page. The **Publish** panel
+sends a canvas-generated H.264 stream over WHIP and shows the stream id,
+sequence, the time source the probe chose and the last marker as they update.
+The **Watch** panel subscribes to the same stream over WHEP with `reader` on
+the receiver and shows the incoming sequence, the sender's origin time, the
+origin-to-here time (transit plus the constant offset between the two clocks),
+markers found, gaps and duplicates. Both panels log every marker to the console,
+prefixed `publish` or `watch`, so the two directions interleave there.
+
+![The demo page publishing and watching at once. The Publish panel shows stream
+id 654340cf09009aab, sequence 103, time source send, frames seen / marked
+104 / 104 and errors 0; the Watch panel shows the same incoming stream id
+654340cf09009aab, incoming sequence 107, origin to here 13.9 ms, frames seen
+100, markers found 103, gaps 0 and duplicates
+0.](demo/screenshot.png)
+
+Regenerate it with `npm run demo:screenshot`, which needs a running WHIP server.
+
+The Watch panel talks plain WHEP and does not care what is at the other end, so
+pointing it at another server's WHIP and WHEP URLs is a one-page check of
+whether that server passes SEI through.
 
 ```sh
 npm run build
 npm run demo          # serves this directory on http://127.0.0.1:8088
 ```
 
+`npm run demo` asks the MediaMTX API whether a server is up before it serves,
+and prints either the WHIP and WHEP URLs or the compose command to start one.
 Then open **http://127.0.0.1:8088/demo/**.
 
 Serve `browser/`, not `browser/demo/`: the page imports the built library from
