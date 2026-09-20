@@ -1,5 +1,5 @@
 {
-  "name": "seimark",
+  "name": "@seimark/browser",
   "version": "0.1.0",
   "description": "Per-frame metadata in H.264 SEI for WebRTC senders and receivers",
   "keywords": ["webrtc", "h264", "sei", "whip", "whep", "encoded-transform", "timestamp", "latency", "mediamtx"],

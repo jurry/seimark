@@ -4,12 +4,12 @@
 
 ## Shape
 
-One npm package, `seimark`, in `browser/` of this repository. Two entry points built from one source tree.
+One npm package, `@seimark/browser`, in `browser/` of this repository. Two entry points built from one source tree.
 
 | Entry | Owns | `lib` | Depends on |
 |---|---|---|---|
-| `seimark` | The marker body codec from `docs/format.md`, the SEI container, the NAL unit walk and insert in both framings, `Writer`, `markersIn`. | `es2022`, no DOM | nothing |
-| `seimark/webrtc` | `attach`, the `RTCRtpScriptTransform` worker, the `createEncodedStreams` fallback, the time source probe. | `es2022` and DOM | `seimark` |
+| `@seimark/browser` | The marker body codec from `docs/format.md`, the SEI container, the NAL unit walk and insert in both framings, `Writer`, `markersIn`. | `es2022`, no DOM | nothing |
+| `@seimark/browser/webrtc` | `attach`, the `RTCRtpScriptTransform` worker, the `createEncodedStreams` fallback, the time source probe. | `es2022` and DOM | `@seimark/browser` |
 
 ESM only. Core has no runtime dependencies; the development dependencies are TypeScript, esbuild and Playwright. Tests run on `node:test`, because the tech stack forbids third-party assertion frameworks. `specs/tech-stack.md` carries all three in its approved table.
 
@@ -25,9 +25,9 @@ Two packages would buy the same separation and cost more than it is worth here, 
 
 The embedding is an esbuild invocation that emits core's compiled JavaScript as a string constant in the webrtc entry. It is not done with `Function.prototype.toString`, which breaks on class fields and under any minifier. The consumer still sees one import, so the no-bundler-tricks rule in the tech stack holds.
 
-`exports` names both entries with the `types` condition first in each, because a top-level `types` field is ignored once `exports` exists. `typesVersions` repeats the subpath so that consumers on `moduleResolution: node`, which ignores `exports` entirely, still resolve types for `seimark/webrtc`.
+`exports` names both entries with the `types` condition first in each, because a top-level `types` field is ignored once `exports` exists. `typesVersions` repeats the subpath so that consumers on `moduleResolution: node`, which ignores `exports` entirely, still resolve types for `@seimark/browser/webrtc`.
 
-## `seimark`
+## `@seimark/browser`
 
 The exported surface is `browser/src/index.ts`, and the generated
 `dist/index.d.ts` is its authority; it is not transcribed here, because a copy
@@ -117,7 +117,7 @@ The receive-side state a subscriber actually wants is gap and duplicate detectio
 
 `hasIDR` exists for callers of core that have no `frame.type` to consult, which is what the Go-parity tests are.
 
-## `seimark/webrtc`
+## `@seimark/browser/webrtc`
 
 The exported surface is `browser/src/webrtc/index.ts`. The receive side gets its
 own handle: a sender's carries one stream id, `framesMarked` and `setPayload`,

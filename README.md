@@ -27,11 +27,11 @@ The wire layout is in [`docs/format.md`](docs/format.md).
 ### Stamp from a browser
 
 ```sh
-npm install seimark
+npm install @seimark/browser
 ```
 
 ```js
-import { attach } from 'seimark/webrtc';
+import { attach } from '@seimark/browser/webrtc';
 
 const sender = pc.addTrack(track, stream);
 const handle = attach(sender);
