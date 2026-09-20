@@ -1,24 +1,50 @@
 import { SeimarkError } from './errors.ts';
 
+/** The marker format version this implementation writes and is the only one it reads. */
 export const VERSION = 1;
 export const FIXED_SIZE = 22;
+/**
+ * Payload size above which a mark still succeeds but reports a
+ * `payload_above_soft_limit` warning, since a large payload is carried on every
+ * marked frame.
+ */
 export const PAYLOAD_SOFT_LIMIT = 4096;
+/** Payload size above which encoding is refused: the length field is 16 bits. */
 export const PAYLOAD_HARD_LIMIT = 65535;
 export const UUID_SIZE = 16;
+/** Required length in bytes of a stream id; any other length is an `invalid_argument`. */
 export const STREAM_ID_SIZE = 8;
 
+/**
+ * The 16-byte UUID that identifies a seimark message inside a
+ * `user_data_unregistered` SEI, distinguishing it from any other vendor's.
+ */
 export const FORMAT_UUID: Readonly<Uint8Array> = Uint8Array.of(
   0x44, 0xa7, 0x3c, 0xb9, 0xb3, 0x6c, 0x45, 0x9a,
   0x8f, 0x1a, 0xa3, 0xaa, 0x43, 0x1f, 0x62, 0x4a,
 );
 
+/**
+ * Which clock reading the origin time is: `'capture'` when the frame carried a
+ * capture time, otherwise `'send'`, taken as the frame is encoded.
+ */
 export type TimeSource = 'send' | 'capture';
 
+/** One decoded marker: the per-frame metadata carried in a frame's own SEI. */
 export interface Marker {
+  /** Which clock `originTimeUs` came from. */
   timeSource: TimeSource;
+  /**
+   * Origin time in microseconds since the Unix epoch. A `bigint` because the
+   * field is a signed 64-bit count and a `number` would lose precision at the
+   * top of the range.
+   */
   originTimeUs: bigint;
+  /** Per-stream counter, incremented once per marked frame, wrapping at 2^32. */
   sequence: number;
+  /** Eight bytes identifying the source; see `STREAM_ID_SIZE`. */
   streamId: Uint8Array;
+  /** Application bytes the sender attached, or null when the payload flag is clear. */
   payload: Uint8Array | null;
 }
 
@@ -33,10 +59,16 @@ const FLAG_PAYLOAD = 0b10;
 const INT64_MIN = -(2n ** 63n);
 const INT64_MAX = 2n ** 63n - 1n;
 
+/** Reports whether these bytes are the seimark UUID, so a foreign SEI is left alone. */
 export function isFormatUUID(uuid: Uint8Array): boolean {
   return uuid.length === UUID_SIZE && FORMAT_UUID.every((b, i) => uuid[i] === b);
 }
 
+/**
+ * Decodes a marker body, the SEI payload with the UUID already stripped. Throws
+ * `SeimarkError` with `truncated` if the body is short and
+ * `unsupported_version` if it is not version 1.
+ */
 export function decodeMarker(body: Uint8Array): Marker {
   if (body.length < FIXED_SIZE) {
     throw new SeimarkError('truncated', `marker body is ${body.length} bytes, needs ${FIXED_SIZE}`);
@@ -72,6 +104,12 @@ export function decodeMarker(body: Uint8Array): Marker {
   };
 }
 
+/**
+ * Encodes a marker body, without the UUID or the SEI wrapper. Throws
+ * `SeimarkError` with `invalid_argument` if the stream id is not
+ * `STREAM_ID_SIZE` bytes or the origin time is outside the signed 64-bit range,
+ * and `payload_too_large` above `PAYLOAD_HARD_LIMIT`.
+ */
 export function encodeMarker(m: Marker): Uint8Array {
   if (m.streamId.length !== STREAM_ID_SIZE) {
     throw new SeimarkError('invalid_argument', `stream id is ${m.streamId.length} bytes, needs ${STREAM_ID_SIZE}`);

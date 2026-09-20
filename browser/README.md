@@ -12,11 +12,12 @@ root, [`../README.md`](../README.md).
 
 ## Install
 
-Not published to npm yet, so `npm install seimark` will not resolve. Until it is:
+Not published to npm yet, so `npm install seimark` will not resolve; it will
+once published. Until then, clone the repository and run
+`npm install <path>/seimark/browser`, or from inside another project:
 
 ```sh
-npm install /path/to/seimark/browser          # from a local checkout
-npm install github:jurry/seimark#main         # from GitHub
+npm install ../seimark/browser
 ```
 
 ESM only. Node 22 or later for the tooling; the package itself has no runtime
@@ -100,7 +101,7 @@ Gap and duplicate detection is per stream id and wraps with the sequence at
 
 | Import | Contains | Needs a DOM |
 |---|---|---|
-| `seimark` | The marker codec, the SEI container, the Annex B and length-prefixed NAL unit walk, `Writer`, `markersIn`, `stripMarkers`. | No |
+| `seimark` | The marker codec, the Annex B and length-prefixed NAL unit walk, `Writer`, `markersIn`, `stripMarkers`. | No |
 | `seimark/webrtc` | `attach`, `reader`, the `RTCRtpScriptTransform` worker and the `createEncodedStreams` fallback. | Yes |
 
 The core entry compiles without the DOM library, so it runs unchanged in Node —
@@ -150,6 +151,13 @@ the page.
 The worker is built from a blob URL, so a page with a restrictive policy needs
 `worker-src blob:`. `attach` detects a policy that refuses the worker and throws
 naming the directive rather than leaving a silent stream that never marks.
+
+```
+Content-Security-Policy: worker-src blob:
+```
+
+A policy that sets only `default-src` falls back to it for workers, so either
+add `worker-src blob:` alongside it or include `blob:` in `default-src` itself.
 
 ## Demo page
 

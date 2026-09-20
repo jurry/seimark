@@ -34,7 +34,7 @@ Design in `docs/design/go-library.md` before implementation.
 - Worker transform over `RTCRtpScriptTransform`, fallback to `createEncodedStreams`. Measured 2026-09-13: Chromium 153 and Firefox 155 both expose the standard API, so the fallback has no browser coverage — it is exercised only through the shared frame handler in the Node tests.
 - Time source probed once per stream and constant thereafter (ADR 0007). Chromium 153 does not populate `captureTime` on sender frames, so streams carry send time; Firefox is unmeasured.
 - Last-marker exposure to the page on a coalesced timer, for correlating UI events with frames.
-- A demo page publishing over WHIP from a canvas source.
+- A demo page publishing over WHIP from a canvas source and watching over WHEP.
 - A Playwright loopback test. It runs chromium only in CI: Firefox's H.264 encoder is the OpenH264 GMP, downloaded at runtime and absent from the Playwright build, so the Firefox project fails rather than being skipped, to keep the gap visible.
 
 Design in `docs/design/browser-package.md`.

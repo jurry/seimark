@@ -7,8 +7,11 @@ Container timestamps are rewritten at every remux and side-channel logs drift.
 seimark answers all three by writing a marker inside the frame's own H.264 SEI,
 where it survives packetisation, a media server that passes SEI through,
 recording, remuxing and cutting, as long as nobody re-encodes. The typical
-pipeline: a page stamps its outgoing frames, a media server records them, and
-the Go CLI or library reads the markers back out of the recording.
+pipeline: a page stamps its outgoing frames over WebRTC through WHIP or WHEP to
+a media server such as MediaMTX or SRS, using the `user_data_unregistered` SEI
+message to carry a per-frame wall-clock timestamp for latency measurement and
+frame loss detection, and the Go CLI or library reads the markers back out of
+the recording.
 
 ## What a marker carries
 
@@ -23,8 +26,12 @@ The wire layout is in [`docs/format.md`](docs/format.md).
 
 ### Stamp from a browser
 
+Not on npm yet, so `npm install seimark` will not resolve; it will once
+published. Until then, clone the repository and run
+`npm install <path>/seimark/browser`, or from inside another project:
+
 ```sh
-npm install github:jurry/seimark#main         # not on npm yet
+npm install ../seimark/browser
 ```
 
 ```js
@@ -36,8 +43,19 @@ const handle = attach(sender);
 console.log(handle.streamId, handle.lastMarker);
 ```
 
-`attach` must be called before `setLocalDescription`. See
-[`browser/README.md`](browser/README.md) for the rest.
+`attach` must be called before `setLocalDescription`. The same package also
+has `reader`, which reads markers off an incoming track — a WHEP subscriber or
+the far end of a call — for live latency, loss and reconnect detection with no
+server involved. See [`browser/README.md`](browser/README.md) for the rest,
+including the [demo page](browser/README.md#demo-page) that shows both
+directions running at once:
+
+![The demo page publishing and watching at once. The Publish panel shows stream
+id 654340cf09009aab, sequence 103, time source send, frames seen / marked
+104 / 104 and errors 0; the Watch panel shows the same incoming stream id
+654340cf09009aab, incoming sequence 107, origin to here 13.9 ms, frames seen
+100, markers found 103, gaps 0 and duplicates
+0.](browser/demo/screenshot.png)
 
 ### Read the markers back
 
@@ -72,6 +90,10 @@ every outgoing frame; see [`browser/README.md`](browser/README.md). The page
 gets the stream id, the time source it settled on, and the last marker sent,
 for correlating a UI event with a frame.
 
+**Read from a browser.** The same package has `reader`, which attaches to an
+`RTCRtpReceiver` and reads markers off an incoming track — a WHEP subscriber
+or the far end of a call — for live latency, loss and reconnect detection.
+
 **Stamp from Go or the CLI.** `seimark inject` marks every access unit of an
 Annex B stream, or only IDR units with `-keyframes-only`; `-start` sets the
 origin time of the first unit, `-stream-id` sets the eight-byte id. `seimark
@@ -103,6 +125,10 @@ for s, err := range mp4.VideoSamples(f) {
 }
 ```
 
+`flv.VideoSamples(r)` and `ts.VideoSamples(r)` take an `io.Reader` the same
+way and yield the same `container.Sample` type, so an FLV or MPEG-TS
+recording is read with the same loop.
+
 ## What it cannot do
 
 - **No clock synchronisation.** A marker carries the sender's own clock; estimating the offset between clocks is the consumer's job.
@@ -119,7 +145,8 @@ Phases 1 to 4 are done: the Go library reads and writes markers, reads Annex B
 streams, MP4, FLV and MPEG-TS files, the CLI has `seimark dump`, `seimark
 inject` and `seimark nals`, and the browser package stamps every outgoing
 frame over WebRTC. Phase 5, MISB ST 0604 compatibility, is next. The roadmap
-is in [`specs/roadmap.md`](specs/roadmap.md).
+is in [`specs/roadmap.md`](specs/roadmap.md); what has shipped so far is
+summarised in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Layout
 

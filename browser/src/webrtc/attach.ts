@@ -8,25 +8,71 @@ import { Writer } from '../writer.ts';
 import { FrameHandler, type FrameLike } from './handle.ts';
 import { type ScriptTransformCtor, buildWorker, scriptTransformCtor } from './worker.ts';
 
+/** Settings for `attach`; all of them have a default. */
 export interface AttachOptions {
+  /**
+   * Eight bytes identifying the stream. Defaults to eight random bytes; any
+   * other length throws `invalid_argument`.
+   */
   streamId?: Uint8Array;
+  /** Mark only keyframes instead of every outgoing frame. Defaults to false. */
   keyframesOnly?: boolean;
+  /**
+   * Called with the first occurrence of each distinct error code, so a stream
+   * failing every frame reports once rather than thirty times a second while a
+   * second, different failure is still reported. `frameCount` is `framesSeen`
+   * at the time. It runs outside the transform, and a throw from it is ignored.
+   */
   onError?: (code: SeimarkErrorCode, message: string, frameCount: number) => void;
+  /**
+   * How often `lastMarker` and `stats` are refreshed, in milliseconds.
+   * Defaults to 100.
+   */
   lastMarkerIntervalMs?: number;
 }
 
+/** Counters for a sender, refreshed on the coalesced timer, never reset. */
 export interface AttachStats {
+  /** Frames that reached the transform, marked or not. */
   framesSeen: number;
+  /** Frames a marker was written into. */
   framesMarked: number;
+  /** Frames that could not be marked. Each was passed through unchanged. */
   errors: number;
 }
 
+/**
+ * The page's view of an attached sender. Every member is readable synchronously
+ * at the moment of a UI event: no await and no subscription.
+ */
 export interface SeimarkHandle {
+  /** The id being stamped, known before the first frame flows. */
   readonly streamId: Uint8Array;
+  /**
+   * The clock the probe settled on from the first frame. `'send'` until then,
+   * and on Chromium 153 senders, which expose no capture time.
+   */
   readonly timeSource: TimeSource;
+  /**
+   * The most recent marker written, or null before the first one. Refreshed on
+   * the coalesced timer, so it lags the stream by at most one interval.
+   */
   readonly lastMarker: Marker | null;
+  /** A snapshot of the counters, refreshed on the same timer as `lastMarker`. */
   readonly stats: Readonly<AttachStats>;
+  /**
+   * Sets the bytes stamped into every marked frame from now on, until replaced;
+   * null clears it. Pushed, not computed per frame, because the writer runs in a
+   * worker that cannot call back into the page. A payload above
+   * `PAYLOAD_SOFT_LIMIT` is still stamped but reported through `onError`.
+   */
   setPayload(bytes: Uint8Array | null): void;
+  /**
+   * Stops marking. On the worker path the transform is removed and the sender
+   * can be attached again; on the `createEncodedStreams` fallback the pipe
+   * cannot be undone, so frames keep flowing untouched and the handle stops
+   * updating.
+   */
   detach(): void;
 }
 
@@ -58,6 +104,16 @@ function encodedStreamsOf(sender: RTCRtpSender): (() => EncodedStreams) | undefi
   return typeof fn === 'function' ? fn.bind(sender) : undefined;
 }
 
+/**
+ * Stamps a marker into every frame leaving `sender`, and returns a handle the
+ * page can read at any time. Call it before `setLocalDescription`: a transform
+ * installed on a running sender sees no frames.
+ *
+ * Throws `SeimarkError` for what is settled up front — `unsupported_browser`,
+ * `invalid_argument` for a bad stream id or a sender with no track,
+ * `already_attached`, `csp_blocked` — and never once frames flow, where a frame
+ * that cannot be marked is passed through unchanged and reported to `onError`.
+ */
 export function attach(sender: RTCRtpSender, opts: AttachOptions = {}): SeimarkHandle {
   const ctor = scriptTransformCtor();
   const streamsOf = encodedStreamsOf(sender);

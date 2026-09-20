@@ -1,18 +1,35 @@
 import { SeimarkError } from './errors.ts';
 
+/**
+ * How NAL units are delimited: `'annexb'` by start codes, as in a raw H.264
+ * stream and in WebRTC encoded frames, or `'length'` by a four-byte big-endian
+ * length, as inside MP4.
+ */
 export type Framing = 'annexb' | 'length';
 
+/** One NAL unit of an access unit, without its start code or length prefix. */
 export interface NALUnit {
+  /** The unit's bytes, a view into the access unit, starting at the header byte. */
   data: Uint8Array;
+  /**
+   * Length of the start code this unit was found behind, so Annex B output can
+   * reproduce it. Always 4 for length-prefixed framing.
+   */
   startCodeLength: 3 | 4;
 }
 
 const LENGTH_SIZE = 4;
 
+/** The five-bit NAL unit type from the header byte; 0 for an empty unit. */
 export function nalType(unit: Uint8Array): number {
   return (unit[0] ?? 0) & 0x1f;
 }
 
+/**
+ * Guesses the framing from the first bytes of an access unit: a start code means
+ * Annex B, otherwise a plausible leading length means length-prefixed. Returns
+ * null when it is neither, which for a WebRTC frame means the data is not H.264.
+ */
 export function detectFraming(au: Uint8Array): Framing | null {
   if (au.length >= 4 && au[0] === 0 && au[1] === 0 && au[2] === 0 && au[3] === 1) {
     return 'annexb';
@@ -46,6 +63,11 @@ function trimTrailingZeros(u: Uint8Array): Uint8Array {
   return u.subarray(0, end);
 }
 
+/**
+ * Splits an access unit into its NAL units. Throws `SeimarkError` with
+ * `truncated` when a length prefix overruns the access unit; Annex B parsing
+ * stops at the first byte that is not a start code rather than throwing.
+ */
 export function nalUnits(au: Uint8Array, framing: Framing): NALUnit[] {
   return framing === 'annexb' ? annexBUnits(au) : lengthUnits(au);
 }
