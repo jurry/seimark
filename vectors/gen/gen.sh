@@ -8,6 +8,9 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 # 20 frames, 160x120, keyframe every 10 frames, no B-frames, no AUD.
+# If the golden Sync flags come out wrong, ffmpeg placed keyframes elsewhere:
+# pin them with -keyint_min 10 -sc_threshold 0 here, never by editing a test.
+# If the PTS step comes out wrong, the MP4 timescale became 10240 or 10000.
 ffmpeg -loglevel error -y -f lavfi -i "testsrc=size=160x120:rate=10:duration=2" \
   -c:v libx264 -preset ultrafast -tune zerolatency -g 10 -bf 0 -pix_fmt yuv420p \
   -f h264 "$tmp/base.h264"

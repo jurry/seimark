@@ -170,7 +170,7 @@ The probe reads `getMetadata()` on the first frame. `captureTime` present means 
 - **Chromium 153: `captureTime` is absent on sender frames.** The probe chose `'send'`; all 117 marked frames of the loopback run carry flag 0. This is the end-to-end result, not a feature test.
 - **Firefox 155: not measured.** No frame ever reached the transform, so the probe never ran. Firefox's H.264 encoder is the OpenH264 GMP, which it fetches at runtime, and the Playwright build ships only `gmp-clearkey`; with H.264 pinned it encodes nothing. The spec's output reports `captureTimeSeen: false` for Firefox, but that is the field's default, not a finding. Firefox's answer is unknown.
 
-So today every seimark stream on Chromium carries send time under flag 0, and a consumer that needs capture time cannot get it from this library there. ADR 0007 records the decision and both states of the measurement. Measuring Firefox is phase 4 work.
+So today every seimark stream on Chromium carries send time under flag 0, and a consumer that needs capture time cannot get it from this library there. ADR 0007 records the decision and both states of the measurement. Measuring Firefox is phase 5 work.
 
 `getMetadata` returns the value shifted to be relative to `performance.timeOrigin`, so converting it to Unix microseconds needs the time origin of the context that reads it. On the standard path that is the **worker's** `performance.timeOrigin`, not the document's; the two differ by however long the worker took to start. The conversion is therefore done where the frame is read, in the same context whose origin applies, and never by passing a raw `captureTime` across `postMessage` to be converted on the other side. The same rule makes send time correct on both paths.
 
