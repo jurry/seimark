@@ -184,7 +184,6 @@ func StripMarkers(au []byte, f Format) ([]byte, error) {
 	return joinNALUnits(kept, f)
 }
 
-// hasIDR reports whether any NAL unit is an IDR picture.
 func hasIDR(nalus [][]byte) bool {
 	for _, nal := range nalus {
 		if len(nal) > 0 && avc.GetNaluType(nal[0]) == avc.NALU_IDR {

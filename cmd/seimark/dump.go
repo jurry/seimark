@@ -10,12 +10,16 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"iter"
 	"os"
 	"strconv"
 
+	"github.com/jurry/seimark/container"
+	"github.com/jurry/seimark/flv"
 	"github.com/jurry/seimark/h264"
 	"github.com/jurry/seimark/marker"
 	"github.com/jurry/seimark/mp4"
+	"github.com/jurry/seimark/ts"
 )
 
 // record is one output line. Pointer fields are omitted when nil, which is how
@@ -37,14 +41,16 @@ type record struct {
 	Payload     *string  `json:"payload,omitempty"`
 }
 
-// errUnknownInput marks a file whose first bytes are neither MP4 nor Annex B,
-// which is a usage problem and not an I/O failure.
+// errUnknownInput marks a file whose first bytes match none of the container
+// formats, which is a usage problem and not an I/O failure.
 var errUnknownInput = errors.New("cannot tell the input format from its first bytes")
 
 const (
 	formatAuto   = "auto"
 	formatAnnexB = "annexb"
 	formatMP4    = "mp4"
+	formatFLV    = "flv"
+	formatTS     = "ts"
 	outJSONL     = "jsonl"
 	outCSV       = "csv"
 )
@@ -69,7 +75,7 @@ type dumpFlags struct {
 func parseDumpFlags(args []string, stderr io.Writer) (flags dumpFlags, exitCode int, ok bool) {
 	fs := flag.NewFlagSet("dump", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	format := fs.String("format", formatAuto, "input format: auto, annexb or mp4")
+	format := fs.String("format", formatAuto, "input format: auto, annexb, mp4, flv or ts")
 	out := fs.String("out", outJSONL, "output format: jsonl or csv")
 
 	all := fs.Bool("all", false, "also print access units without a marker")
@@ -93,13 +99,23 @@ func parseDumpFlags(args []string, stderr io.Writer) (flags dumpFlags, exitCode 
 		return dumpFlags{}, exitUsage, false
 	}
 
-	if *format != formatAuto && *format != formatAnnexB && *format != formatMP4 {
-		fmt.Fprintf(stderr, "seimark dump: -format must be auto, annexb or mp4, got %q\n", *format)
+	if !knownFormat(*format) {
+		fmt.Fprintf(stderr, "seimark dump: -format must be auto, annexb, mp4, flv or ts, got %q\n", *format)
 
 		return dumpFlags{}, exitUsage, false
 	}
 
 	return dumpFlags{format: *format, out: *out, all: *all, path: fs.Arg(0)}, exitOK, true
+}
+
+// knownFormat reports whether f is one the -format flag accepts.
+func knownFormat(f string) bool {
+	switch f {
+	case formatAuto, formatAnnexB, formatMP4, formatFLV, formatTS:
+		return true
+	}
+
+	return false
 }
 
 func runDump(args []string, stdout, stderr io.Writer) int {
@@ -143,7 +159,11 @@ func runDump(args []string, stdout, stderr io.Writer) int {
 	case formatAnnexB:
 		walkErr = dumpAnnexB(f, w, flags.all, warn)
 	case formatMP4:
-		walkErr = dumpMP4(f, w, flags.all, warn)
+		walkErr = dumpContainer(mp4.VideoSamples(f), w, flags.all, warn)
+	case formatFLV:
+		walkErr = dumpContainer(flv.VideoSamples(f), w, flags.all, warn)
+	case formatTS:
+		walkErr = dumpContainer(ts.VideoSamples(f), w, flags.all, warn)
 	}
 
 	if err := w.flush(); err != nil {
@@ -167,12 +187,24 @@ const boxSizeFieldSize = 4
 // boxHeaderSize is a box's size field plus its four-byte type field.
 const boxHeaderSize = boxSizeFieldSize + 4
 
-// sniffHeadSize is the read-ahead used to tell mp4 from Annex B: enough for a
-// box header and for h264.DetectFormat's own look at the first bytes.
-const sniffHeadSize = 12
+// flvSignatureSize is the "FLV" signature plus the version byte after it.
+const flvSignatureSize = 4
 
-// sniff decides between mp4 and annexb from the first bytes and rewinds. A
-// short file is not an error; anything else the read reports is.
+// flvVersion is the only FLV version this reads.
+const flvVersion = 1
+
+// tsPacketSize is the MPEG-TS packet stride, at which the next sync byte stands.
+const tsPacketSize = 188
+
+// tsSyncByte begins every MPEG-TS packet.
+const tsSyncByte = 0x47
+
+// sniffHeadSize is the read-ahead the format tests share: one MPEG-TS packet
+// plus the sync byte that must follow it, which is the longest of them.
+const sniffHeadSize = tsPacketSize + 1
+
+// sniff picks the input format from the first bytes and rewinds. A short file
+// is not an error; anything else the read reports is.
 func sniff(f io.ReadSeeker) (string, error) {
 	var head [sniffHeadSize]byte
 
@@ -185,18 +217,36 @@ func sniff(f io.ReadSeeker) (string, error) {
 		return "", fmt.Errorf("seimark: rewind input: %w", err)
 	}
 
-	if n >= boxHeaderSize {
-		switch string(head[boxSizeFieldSize:boxHeaderSize]) {
-		case "ftyp", "moov", "moof", "styp":
-			return formatMP4, nil
-		}
-	}
-
-	if h264.DetectFormat(head[:n]) == h264.FormatAnnexB {
-		return formatAnnexB, nil
+	if format, ok := sniffHead(head[:n]); ok {
+		return format, nil
 	}
 
 	return "", errUnknownInput
+}
+
+// sniffHead names the format of head, which is the first bytes of the input.
+// MP4 comes first because a box header cannot be mistaken for anything else.
+func sniffHead(head []byte) (string, bool) {
+	if len(head) >= boxHeaderSize {
+		switch string(head[boxSizeFieldSize:boxHeaderSize]) {
+		case "ftyp", "moov", "moof", "styp":
+			return formatMP4, true
+		}
+	}
+
+	if len(head) >= flvSignatureSize && string(head[:3]) == "FLV" && head[3] == flvVersion {
+		return formatFLV, true
+	}
+
+	if len(head) > tsPacketSize && head[0] == tsSyncByte && head[tsPacketSize] == tsSyncByte {
+		return formatTS, true
+	}
+
+	if h264.DetectFormat(head) == h264.FormatAnnexB {
+		return formatAnnexB, true
+	}
+
+	return "", false
 }
 
 func dumpAnnexB(r io.Reader, w *recordWriter, all bool, warn func(int, error)) error {
@@ -214,16 +264,18 @@ func dumpAnnexB(r io.Reader, w *recordWriter, all bool, warn func(int, error)) e
 	return nil
 }
 
-func dumpMP4(r io.ReadSeeker, w *recordWriter, all bool, warn func(int, error)) error {
-	for s, err := range mp4.VideoSamples(r) {
+// dumpContainer emits the records of one container reader's samples; the
+// three container formats differ only in the sequence passed in.
+func dumpContainer(samples iter.Seq2[container.Sample, error], w *recordWriter, all bool, warn func(int, error)) error {
+	for s, err := range samples {
 		if err != nil {
 			return err
 		}
 
-		dts, pts, ts, sync := s.DTS, s.PTS, s.Timescale, s.Sync
-		t := float64(pts) / float64(ts)
-		base := record{AU: s.Index, DTS: &dts, PTS: &pts, Timescale: &ts, Sync: &sync, Time: &t}
-		emit(w, &base, s.Data, h264.FormatLengthPrefixed, all, warn)
+		dts, pts, scale, sync := s.DTS, s.PTS, s.Timescale, s.Sync
+		t := float64(pts) / float64(scale)
+		base := record{AU: s.Index, DTS: &dts, PTS: &pts, Timescale: &scale, Sync: &sync, Time: &t}
+		emit(w, &base, s.Data, s.Framing.H264(), all, warn)
 	}
 
 	return nil

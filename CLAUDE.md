@@ -18,7 +18,7 @@ Per-frame metadata in H.264 SEI: a marker format, a Go library and CLI, a browse
 | Test vectors | `vectors/` | Versioned. The conformance suite for every implementation of the format. |
 | Package documentation | `README.md`, `browser/README.md` | LIVING. The front door for someone using that package: what it is, how to run it, what it cannot do. Points at `docs/` for the format and the designs; never restates them. |
 
-Every document states its type, LIVING or SNAPSHOT, under its title. No "Update:" notes stacked at the bottom of a living document; edit the sentence, git holds the history.
+Every document except a README states its type, LIVING or SNAPSHOT, under its title; READMEs are always living. No "Update:" notes stacked at the bottom of a living document; edit the sentence, git holds the history.
 
 ## How work proceeds
 

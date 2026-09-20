@@ -32,9 +32,45 @@ func fourByteStartCode() []byte {
 // first_mb_in_slice is zero.
 func AccessUnits(r io.Reader) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
+		for au, err := range AccessUnitsAt(r) {
+			if !yield(au.Bytes, err) {
+				return
+			}
+		}
+	}
+}
+
+// AccessUnit is one access unit with where it was found in the input.
+type AccessUnit struct {
+	// Bytes is the unit in Annex B form with four-byte start codes, which is
+	// not the input's own framing: three-byte start codes are widened and
+	// trailing zeros dropped, so Bytes is not Offset's slice of the input.
+	Bytes []byte
+
+	// Offset is the byte position in the input of the start code preceding the
+	// unit's first NAL unit.
+	Offset int
+}
+
+// AccessUnitsAt splits an Annex B byte stream into access units exactly as
+// AccessUnits does, reporting with each unit where in the input it began. A
+// caller that must map a unit back onto the input, such as a container reader
+// attributing timestamps to byte ranges, needs the offset because a unit's own
+// length is not the number of bytes it was cut from.
+func AccessUnitsAt(r io.Reader) iter.Seq2[AccessUnit, error] {
+	return func(yield func(AccessUnit, error) bool) {
 		sc := bufio.NewScanner(r)
 		sc.Buffer(make([]byte, 0, initialScanBufferSize), maxNALUnitSize)
-		sc.Split(splitNALUnits)
+
+		var consumed, at int
+
+		sc.Split(func(data []byte, atEOF bool) (int, []byte, error) {
+			advance, token, begin := splitNALUnits(data, atEOF)
+			at = consumed + begin
+			consumed += advance
+
+			return advance, token, nil
+		})
 
 		var cur accessUnit
 
@@ -44,19 +80,20 @@ func AccessUnits(r io.Reader) iter.Seq2[[]byte, error] {
 				continue
 			}
 
-			if done := cur.add(nal); done != nil && !yield(done, nil) {
+			if done, offset := cur.add(nal, at); done != nil &&
+				!yield(AccessUnit{Bytes: done, Offset: offset}, nil) {
 				return
 			}
 		}
 
 		if err := sc.Err(); err != nil {
-			yield(nil, err)
+			yield(AccessUnit{}, err)
 
 			return
 		}
 
 		if len(cur.bytes) > 0 {
-			yield(cur.bytes, nil)
+			yield(AccessUnit{Bytes: cur.bytes, Offset: cur.offset}, nil)
 		}
 	}
 }
@@ -64,24 +101,29 @@ func AccessUnits(r io.Reader) iter.Seq2[[]byte, error] {
 // accessUnit accumulates the NAL units of one access unit.
 type accessUnit struct {
 	bytes  []byte
+	offset int
 	sawVCL bool
 }
 
-// add appends nal, returning the finished access unit when nal starts a new one.
-func (a *accessUnit) add(nal []byte) []byte {
+// add appends nal, found at offset at in the input, returning the finished
+// access unit and its own offset when nal starts a new one.
+func (a *accessUnit) add(nal []byte, at int) (done []byte, offset int) {
 	t := avc.GetNaluType(nal[0])
 
-	var done []byte
 	if a.sawVCL && startsAccessUnit(nal, t) {
-		done = a.bytes
+		done, offset = a.bytes, a.offset
 		*a = accessUnit{}
+	}
+
+	if len(a.bytes) == 0 {
+		a.offset = at
 	}
 
 	a.bytes = append(a.bytes, fourByteStartCode()...)
 	a.bytes = append(a.bytes, nal...)
 	a.sawVCL = a.sawVCL || avc.IsVideoNaluType(t)
 
-	return done
+	return done, offset
 }
 
 // carriesMarker reports whether this one SEI NAL unit holds a seimark marker.
@@ -116,19 +158,26 @@ func startsAccessUnit(nal []byte, t avc.NaluType) bool {
 	return false
 }
 
-// splitNALUnits is a bufio.SplitFunc yielding NAL units without start codes.
-// Trailing zero bytes belong to the next start code or are trailing_zero_8bits,
-// so they are trimmed.
-func splitNALUnits(data []byte, atEOF bool) (advance int, token []byte, err error) {
+// splitNALUnits is a bufio.SplitFunc yielding NAL units without start codes,
+// with start reporting where in data the start code introducing the token
+// begins. Trailing zero bytes belong to the next start code or are
+// trailing_zero_8bits, so they are trimmed.
+func splitNALUnits(data []byte, atEOF bool) (advance int, token []byte, start int) {
 	sc := startCode()
 
 	begin := bytes.Index(data, sc)
 	if begin < 0 {
 		if atEOF {
-			return len(data), nil, nil
+			return len(data), nil, len(data)
 		}
 
-		return 0, nil, nil
+		return 0, nil, 0
+	}
+
+	// A four-byte start code is the three-byte one with a leading zero.
+	start = begin
+	if begin > 0 && data[begin-1] == 0 {
+		start = begin - 1
 	}
 
 	begin += len(sc)
@@ -136,15 +185,15 @@ func splitNALUnits(data []byte, atEOF bool) (advance int, token []byte, err erro
 	next := bytes.Index(data[begin:], sc)
 	if next < 0 {
 		if !atEOF {
-			return 0, nil, nil
+			return 0, nil, 0
 		}
 
-		return len(data), trimZeros(data[begin:]), nil
+		return len(data), trimZeros(data[begin:]), start
 	}
 
 	end := begin + next
 
-	return end, trimZeros(data[begin:end]), nil
+	return end, trimZeros(data[begin:end]), start
 }
 
 func trimZeros(b []byte) []byte {

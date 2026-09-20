@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -11,7 +13,10 @@ import (
 func TestDumpGolden(t *testing.T) {
 	t.Parallel()
 
-	for _, name := range []string{"testsrc-marked.h264", "testsrc-marked.mp4", "testsrc-marked-frag.mp4"} {
+	for _, name := range []string{
+		"testsrc-marked.h264", "testsrc-marked.mp4", "testsrc-marked-frag.mp4",
+		"testsrc-marked.flv", "testsrc-marked.ts",
+	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -181,5 +186,190 @@ func TestDumpWarnsOnUnparsableSEIAndKeepsGoing(t *testing.T) {
 
 	if !strings.Contains(errOut.String(), "does not parse") {
 		t.Fatalf("stderr = %q, want a warning about the unparsable SEI", errOut.String())
+	}
+}
+
+func TestSniffDetectsEveryFixture(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		want string
+	}{
+		{"testsrc-marked.h264", formatAnnexB},
+		{"testsrc-marked.mp4", formatMP4},
+		{"testsrc-marked-frag.mp4", formatMP4},
+		{"testsrc-marked.flv", formatFLV},
+		{"testsrc-marked.ts", formatTS},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			f, err := os.Open(fixturePath(tc.name))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			defer func() { _ = f.Close() }()
+
+			got, err := sniff(f)
+			if err != nil {
+				t.Fatalf("sniff: %v", err)
+			}
+
+			if got != tc.want {
+				t.Fatalf("sniff = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSniffDoesNotMistake0x47ForTS(t *testing.T) {
+	t.Parallel()
+
+	long := bytes.Repeat([]byte{0x47}, 300)
+	long[188] = 0x00
+
+	for _, tc := range []struct {
+		name string
+		data []byte
+	}{
+		{"no sync byte at 188", long},
+		{"shorter than a packet", bytes.Repeat([]byte{0x47}, 12)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got, _ := sniff(bytes.NewReader(tc.data)); got == formatTS {
+				t.Fatalf("sniff = %q, want anything but ts", got)
+			}
+		})
+	}
+}
+
+func TestSniffShortFile(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "short.bin")
+	if err := os.WriteFile(path, []byte{1, 2, 3}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	if code := run([]string{"dump", path}, &out, &errOut); code != 2 {
+		t.Fatalf("exit %d, want 2; stderr: %s", code, errOut.String())
+	}
+}
+
+func TestDumpFlagRejectsUnknownFormat(t *testing.T) {
+	t.Parallel()
+
+	var out, errOut bytes.Buffer
+	if code := run([]string{"dump", "-format", "ogg", "x"}, &out, &errOut); code != 2 {
+		t.Fatalf("exit %d, want 2", code)
+	}
+
+	for _, want := range []string{formatAuto, formatAnnexB, formatMP4, formatFLV, formatTS} {
+		if !strings.Contains(errOut.String(), want) {
+			t.Fatalf("stderr = %q, want it to list %q", errOut.String(), want)
+		}
+	}
+}
+
+func TestDumpExplicitFormatMatchesAuto(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct{ name, format string }{
+		{"testsrc-marked.flv", formatFLV},
+		{"testsrc-marked.ts", formatTS},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := fixturePath(tc.name)
+
+			var auto, explicit, errOut bytes.Buffer
+			if code := run([]string{"dump", "-out", "jsonl", path}, &auto, &errOut); code != 0 {
+				t.Fatalf("auto: exit %d: %s", code, errOut.String())
+			}
+
+			if code := run([]string{"dump", "-out", "jsonl", "-format", tc.format, path}, &explicit, &errOut); code != 0 {
+				t.Fatalf("-format %s: exit %d: %s", tc.format, code, errOut.String())
+			}
+
+			if !bytes.Equal(auto.Bytes(), explicit.Bytes()) {
+				t.Fatalf("-format %s output differs from auto", tc.format)
+			}
+		})
+	}
+}
+
+// markerColumns are the record fields that must not depend on the container.
+var markerColumns = []string{
+	"marker_index", "version", "time_source", "origin_time",
+	"origin_us", "sequence", "stream_id", "payload",
+}
+
+// markerProjection dumps a fixture and keeps only the marker columns of every record.
+func markerProjection(t *testing.T, name string) []map[string]any {
+	t.Helper()
+
+	var out, errOut bytes.Buffer
+
+	if code := run([]string{"dump", "-out", "jsonl", fixturePath(name)}, &out, &errOut); code != 0 {
+		t.Fatalf("%s: exit %d: %s", name, code, errOut.String())
+	}
+
+	lines := bytes.SplitSeq(bytes.TrimRight(out.Bytes(), "\n"), []byte("\n"))
+	projected := make([]map[string]any, 0, 20)
+
+	for line := range lines {
+		var rec map[string]any
+
+		if err := json.Unmarshal(line, &rec); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+
+		only := make(map[string]any, len(markerColumns))
+
+		// An absent optional column, payload, is itself part of the projection.
+		for _, c := range markerColumns {
+			if v, ok := rec[c]; ok {
+				only[c] = v
+			}
+		}
+
+		projected = append(projected, only)
+	}
+
+	return projected
+}
+
+func TestSameMarkersInEveryContainer(t *testing.T) {
+	t.Parallel()
+
+	names := []string{
+		"testsrc-marked.h264", "testsrc-marked.mp4", "testsrc-marked-frag.mp4",
+		"testsrc-marked.flv", "testsrc-marked.ts",
+	}
+
+	want := markerProjection(t, names[0])
+
+	if len(want) != 20 {
+		t.Fatalf("%s: %d records, want 20", names[0], len(want))
+	}
+
+	for _, name := range names[1:] {
+		got := markerProjection(t, name)
+
+		if len(got) != 20 {
+			t.Fatalf("%s: %d records, want 20", name, len(got))
+		}
+
+		for i := range got {
+			if !reflect.DeepEqual(got[i], want[i]) {
+				t.Errorf("%s record %d: %v, want %v", name, i, got[i], want[i])
+			}
+		}
 	}
 }

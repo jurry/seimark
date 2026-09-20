@@ -17,5 +17,7 @@ go run . "$tmp/base.h264" "$out/testsrc-marked.h264"
 ffmpeg -loglevel error -y -r 10 -i "$out/testsrc-marked.h264" -c copy "$out/testsrc-marked.mp4"
 ffmpeg -loglevel error -y -r 10 -i "$out/testsrc-marked.h264" -c copy \
   -movflags frag_keyframe+empty_moov+default_base_moof "$out/testsrc-marked-frag.mp4"
+ffmpeg -loglevel error -y -r 10 -i "$out/testsrc-marked.h264" -c copy "$out/testsrc-marked.flv"
+ffmpeg -loglevel error -y -r 10 -i "$out/testsrc-marked.h264" -c copy "$out/testsrc-marked.ts"
 
 ls -l "$out"

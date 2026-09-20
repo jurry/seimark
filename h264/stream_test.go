@@ -238,3 +238,39 @@ func TestAccessUnitsKeyframesOnlyShape(t *testing.T) {
 		t.Fatalf("sequences %d and %d, want 0 and 1", first[0].Sequence, third[0].Sequence)
 	}
 }
+
+func TestAccessUnitsAtReportsTheOffsetOfEachStartCode(t *testing.T) {
+	t.Parallel()
+
+	// Leading garbage, then a four-byte start code, then a three-byte one.
+	stream := make([]byte, 0, 6+len(idr)+3+len(nonIDR))
+	stream = append(stream, 0xaa, 0xbb)
+	firstAt := len(stream)
+	stream = append(stream, 0, 0, 0, 1)
+	stream = append(stream, idr...)
+
+	secondAt := len(stream)
+	stream = append(stream, 0, 0, 1)
+	stream = append(stream, nonIDR...)
+
+	var got []int
+
+	for au, err := range AccessUnitsAt(bytes.NewReader(stream)) {
+		if err != nil {
+			t.Fatalf("AccessUnitsAt: %v", err)
+		}
+
+		got = append(got, au.Offset)
+	}
+
+	want := []int{firstAt, secondAt}
+	if len(got) != len(want) {
+		t.Fatalf("got %d access units, want %d", len(got), len(want))
+	}
+
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("access unit %d: Offset = %d, want %d", i, got[i], want[i])
+		}
+	}
+}

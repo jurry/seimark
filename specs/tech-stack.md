@@ -8,6 +8,7 @@
 |---|---|---|
 | Language, core | Go 1.26, pure Go | One static binary, cross-compiles everywhere, no CGO to keep `go get` painless. |
 | MP4 and SEI primitives | `github.com/Eyevinn/mp4ff` (MIT, active) | Solid MP4 parsing including fragmented files, and SEI encode and decode with emulation-prevention handling. Building on it beats duplicating it (ADR 0004). |
+| MPEG-TS demultiplexing | `github.com/asticode/go-astits` (MIT, active) | Packets, PAT, PMT, reassembly and PES headers, the part of MPEG-TS that is not seimark's subject and is easy to get quietly wrong. Access units are still cut by `h264.AccessUnits` (ADR 0008). |
 | CLI | Standard library `flag` with subcommands | One binary, three subcommands; a framework would be most of the dependency tree. |
 | Tests | Standard library `testing`, golden files in `vectors/` | The vectors are the format's conformance suite and are shared with the browser package. |
 | Lint | golangci-lint v2, every linter on, each disabled one justified in .golangci.yaml; gofumpt and gci as formatters | Findings are read, not silenced; new linters are on until argued off. |
