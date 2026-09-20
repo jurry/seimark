@@ -38,3 +38,9 @@ dist/
 .env
 .idea/
 /seimark
+
+# seimark: quick start outputs
+/raw.h264
+/marked.*
+/cut.*
+/recordings/
