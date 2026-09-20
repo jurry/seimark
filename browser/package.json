@@ -22,6 +22,7 @@
     "build": "npm run build:worker && tsc -p tsconfig.webrtc.json",
     "test": "npm run build:worker && node --test --experimental-strip-types test/*.test.ts",
     "demo": "node demo/serve.mjs",
+    "demo:screenshot": "node demo/screenshot.mjs",
     "e2e": "npm run build && playwright test"
   },
   "devDependencies": {

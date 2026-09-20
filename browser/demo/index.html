@@ -3,21 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>seimark WHIP publisher</title>
+<title>seimark publish and watch</title>
 <style>
   :root { color-scheme: light dark; }
   body {
     font: 14px/1.5 system-ui, sans-serif;
     margin: 0 auto;
-    max-width: 60rem;
+    max-width: 76rem;
     padding: 1.5rem 1rem;
   }
   h1 { font-size: 1.3rem; margin: 0 0 .25rem; }
-  p.lede { margin: 0 0 1.5rem; opacity: .75; }
-  .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: 1rem; }
+  h2 { font-size: 1.05rem; margin: 0 0 .75rem; }
+  p.lede { margin: 0 0 1rem; opacity: .75; }
+  .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .75rem; }
   label { font-weight: 600; }
   input[type=url], input[type=text] {
-    flex: 1 1 20rem;
+    flex: 1 1 14rem;
     font: inherit;
     padding: .4rem .5rem;
     border: 1px solid currentColor;
@@ -27,48 +28,93 @@
   }
   button { font: inherit; padding: .4rem .9rem; border-radius: .25rem; cursor: pointer; }
   button[disabled] { opacity: .5; cursor: default; }
-  .panes { display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: flex-start; }
-  canvas { border: 1px solid currentColor; border-radius: .25rem; }
-  table { border-collapse: collapse; min-width: 22rem; }
+  /* Subgrid so every row — buttons, video, table, status — lines up across both
+     panels, which the Publish-only payload row would otherwise push out of step. */
+  .panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: repeat(8, auto);
+    column-gap: 1.5rem;
+    row-gap: .75rem;
+  }
+  section.panel {
+    display: grid;
+    grid-template-rows: subgrid;
+    grid-row: span 8;
+    align-content: start;
+    border: 1px solid currentColor;
+    border-radius: .4rem;
+    padding: 1rem;
+    min-width: 0;
+  }
+  section.panel > * { margin-top: 0; margin-bottom: 0; }
+  .row { margin-bottom: 0; }
+  @media (max-width: 52rem) {
+    .panels { grid-template-columns: 1fr; grid-template-rows: none; }
+    section.panel { grid-row: auto; grid-template-rows: none; gap: .75rem; }
+    .row.placeholder { display: none; }
+  }
+  canvas, video {
+    border: 1px solid currentColor;
+    border-radius: .25rem;
+    width: 100%;
+    max-width: 320px;
+    background: #000;
+  }
+  table { border-collapse: collapse; width: 100%; margin-top: .75rem; }
   th, td { text-align: left; padding: .25rem .75rem .25rem 0; vertical-align: top; }
-  th { font-weight: 600; opacity: .7; white-space: nowrap; }
+  th { font-weight: 600; opacity: .7; }
   td { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
-  #status { min-height: 1.5em; margin-top: 1rem; }
-  #status.bad { color: #c0392b; }
+  .note { opacity: .7; font-size: .9em; }
+  #reach { margin: 0 0 1.25rem; padding: .5rem .75rem; border: 1px solid currentColor; border-radius: .25rem; }
+  #reach.bad { color: #c0392b; }
+  .status { min-height: 1.5em; margin: .75rem 0 0; }
+  .status.bad { color: #c0392b; }
+  code, pre { font-family: ui-monospace, monospace; }
+  pre { overflow-x: auto; padding: .5rem .75rem; border: 1px solid currentColor; border-radius: .25rem; }
 </style>
 </head>
 <body>
 
-<h1>seimark WHIP publisher</h1>
+<h1>seimark publish and watch</h1>
 <p class="lede">
-  Publishes a generated canvas over WHIP, stamps every access unit with a seimark
-  marker on the sender, and shows what the page can read back from the handle.
-  No camera and no dependencies.
+  The left panel publishes a generated canvas over WHIP and stamps every access
+  unit with a seimark marker. The right panel subscribes to the same stream over
+  WHEP and reads those markers back off the received track. Every marker in both
+  directions is also logged to the console, prefixed <code>publish</code> or
+  <code>watch</code>. No camera and no dependencies.
 </p>
 
-<div class="row">
-  <label for="whip">WHIP endpoint</label>
-  <input id="whip" type="url" placeholder="https://example.org/whip/live" autocomplete="off">
-</div>
+<p id="reach">Checking the media server&hellip;</p>
 
-<div class="row">
-  <label for="token">Bearer token</label>
-  <input id="token" type="text" placeholder="optional" autocomplete="off">
-</div>
+<div class="panels">
 
-<div class="row">
-  <label for="payload">Payload</label>
-  <input id="payload" type="text" placeholder="stamped into every marked frame" autocomplete="off">
-  <button id="send-payload" type="button" disabled>Set</button>
-</div>
+<section class="panel">
+  <h2>Publish</h2>
 
-<div class="row">
-  <button id="start" type="button">Publish</button>
-  <button id="stop" type="button" disabled>Stop</button>
-</div>
+  <div class="row">
+    <label for="whip">WHIP endpoint</label>
+    <input id="whip" type="url" value="http://127.0.0.1:8889/seimark/whip" autocomplete="off">
+  </div>
 
-<div class="panes">
+  <div class="row">
+    <label for="token">Bearer token</label>
+    <input id="token" type="text" placeholder="optional" autocomplete="off">
+  </div>
+
+  <div class="row">
+    <label for="payload">Payload</label>
+    <input id="payload" type="text" placeholder="stamped into every marked frame" autocomplete="off">
+    <button id="send-payload" type="button" disabled>Set</button>
+  </div>
+
+  <div class="row">
+    <button id="start" type="button">Publish</button>
+    <button id="stop" type="button" disabled>Stop</button>
+  </div>
+
   <canvas id="source" width="320" height="240"></canvas>
+
   <table>
     <tbody>
       <tr><th>stream id</th><td id="stream-id">&mdash;</td></tr>
@@ -80,14 +126,67 @@
       <tr><th>errors</th><td id="errors">0</td></tr>
     </tbody>
   </table>
+
+  <p id="status" class="status"></p>
+</section>
+
+<section class="panel">
+  <h2>Watch</h2>
+
+  <div class="row">
+    <label for="whep">WHEP endpoint</label>
+    <input id="whep" type="url" value="http://127.0.0.1:8889/seimark/whep" autocomplete="off">
+  </div>
+
+  <div class="row">
+    <label for="whep-token">Bearer token</label>
+    <input id="whep-token" type="text" placeholder="optional" autocomplete="off">
+  </div>
+
+  <div class="row placeholder" aria-hidden="true"></div>
+
+  <div class="row">
+    <button id="watch-start" type="button">Watch</button>
+    <button id="watch-stop" type="button" disabled>Stop</button>
+  </div>
+
+  <video id="received" autoplay muted playsinline></video>
+
+  <table>
+    <tbody>
+      <tr><th>incoming stream id</th><td id="w-stream-id">&mdash;</td></tr>
+      <tr><th>incoming sequence</th><td id="w-sequence">&mdash;</td></tr>
+      <tr><th>sender origin time</th><td id="w-origin">&mdash;</td></tr>
+      <tr><th>origin to here<br><span class="note">includes clock offset</span></th><td id="w-latency">&mdash;</td></tr>
+      <tr><th>frames seen</th><td id="w-frames">&mdash;</td></tr>
+      <tr><th>markers found</th><td id="w-markers">0</td></tr>
+      <tr><th>gaps</th><td id="w-gaps">0</td></tr>
+      <tr><th>duplicates</th><td id="w-duplicates">0</td></tr>
+    </tbody>
+  </table>
+
+  <p id="watch-status" class="status"></p>
+</section>
+
 </div>
 
-<p id="status"></p>
+<h2 style="margin-top:2rem">Read the recording</h2>
+<p>
+  The server records what it receives under <code>e2e/recordings/</code>, one
+  file per session named after the stream &mdash; <code>seimark</code> for the
+  prefilled URLs. <code>e2e/mediamtx.yml</code> records in fMP4, so the files are
+  <code>.mp4</code>. List the directory, then dump one with the Go CLI from the
+  repository root:
+</p>
+<pre>go build -o seimark ./cmd/seimark
+ls browser/e2e/recordings/
+./seimark dump browser/e2e/recordings/seimark_&lt;timestamp&gt;.mp4</pre>
 
 <script type="module">
-import { attach } from '../dist/webrtc/index.js';
+import { attach, reader } from '../dist/webrtc/index.js';
 
 const els = {
+  reach: document.getElementById('reach'),
   whip: document.getElementById('whip'),
   token: document.getElementById('token'),
   payload: document.getElementById('payload'),
@@ -103,9 +202,26 @@ const els = {
   frames: document.getElementById('frames'),
   errors: document.getElementById('errors'),
   status: document.getElementById('status'),
+
+  whep: document.getElementById('whep'),
+  whepToken: document.getElementById('whep-token'),
+  watchStart: document.getElementById('watch-start'),
+  watchStop: document.getElementById('watch-stop'),
+  video: document.getElementById('received'),
+  wStreamId: document.getElementById('w-stream-id'),
+  wSequence: document.getElementById('w-sequence'),
+  wOrigin: document.getElementById('w-origin'),
+  wLatency: document.getElementById('w-latency'),
+  wFrames: document.getElementById('w-frames'),
+  wMarkers: document.getElementById('w-markers'),
+  wGaps: document.getElementById('w-gaps'),
+  wDuplicates: document.getElementById('w-duplicates'),
+  watchStatus: document.getElementById('watch-status'),
 };
 
 const FPS = 30;
+const ICE_GATHER_TIMEOUT_MS = 1000;
+
 const session = {
   pc: null,
   handle: null,
@@ -116,15 +232,42 @@ const session = {
   errors: 0,
 };
 
+const watch = {
+  pc: null,
+  handle: null,
+  poller: null,
+  resource: null,
+  latencyMs: null,
+};
+
 function say(text, bad = false) {
   els.status.textContent = text;
   els.status.classList.toggle('bad', bad);
+}
+
+function sayWatch(text, bad = false) {
+  els.watchStatus.textContent = text;
+  els.watchStatus.classList.toggle('bad', bad);
 }
 
 function hex(bytes) {
   let out = '';
   for (const b of bytes) out += b.toString(16).padStart(2, '0');
   return out;
+}
+
+function line(m) {
+  return {
+    seq: m.sequence,
+    streamId: hex(m.streamId),
+    originTimeUs: String(m.originTimeUs),
+    timeSource: m.timeSource,
+    payload: m.payload === null ? null : new TextDecoder().decode(m.payload),
+  };
+}
+
+function nowUs() {
+  return BigInt(Math.round((performance.timeOrigin + performance.now()) * 1000));
 }
 
 function paint(canvas) {
@@ -152,14 +295,17 @@ function preferH264(transceiver) {
   transceiver.setCodecPreferences(codecs);
 }
 
-/** WHIP: POST the offer as application/sdp, take the answer from the 201 body. */
-async function whipPublish(endpoint, token, offerSdp) {
+/** WHIP and WHEP both POST the offer as application/sdp and answer with 201 + Location. */
+async function postOffer(endpoint, token, offerSdp) {
   const headers = { 'Content-Type': 'application/sdp' };
   if (token !== '') headers.Authorization = `Bearer ${token}`;
 
   const response = await fetch(endpoint, { method: 'POST', headers, body: offerSdp });
+  if (response.status === 404 && endpoint.endsWith('/whep')) {
+    throw new Error('endpoint answered 404: nothing is publishing on this path, start Publish first');
+  }
   if (response.status !== 201) {
-    throw new Error(`WHIP endpoint answered ${response.status} ${response.statusText}`);
+    throw new Error(`endpoint answered ${response.status} ${response.statusText}`);
   }
 
   const location = response.headers.get('Location');
@@ -169,11 +315,28 @@ async function whipPublish(endpoint, token, offerSdp) {
   };
 }
 
-async function whipDelete(resource, token) {
+async function deleteResource(resource, token) {
   if (resource === null) return;
   const headers = {};
   if (token !== '') headers.Authorization = `Bearer ${token}`;
   await fetch(resource, { method: 'DELETE', headers }).catch(() => undefined);
+}
+
+/** MediaMTX answers with the whole candidate set, so gathering need not complete. */
+function iceSettled(pc) {
+  if (pc.iceGatheringState === 'complete') return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      pc.removeEventListener('icegatheringstatechange', check);
+      resolve();
+    };
+    const check = () => {
+      if (pc.iceGatheringState === 'complete') done();
+    };
+    const timer = setTimeout(done, ICE_GATHER_TIMEOUT_MS);
+    pc.addEventListener('icegatheringstatechange', check);
+  });
 }
 
 function render() {
@@ -198,6 +361,31 @@ function render() {
   })`;
   els.markerPayload.textContent =
     marker.payload === null ? '(none)' : new TextDecoder().decode(marker.payload);
+}
+
+function renderWatch() {
+  const handle = watch.handle;
+  if (handle === null) return;
+
+  const stats = handle.stats;
+  els.wFrames.textContent = String(stats.framesSeen);
+  els.wMarkers.textContent = String(stats.markersFound);
+  els.wGaps.textContent = String(stats.gaps);
+  els.wDuplicates.textContent = String(stats.duplicates);
+
+  const marker = handle.lastMarker;
+  if (marker === null) {
+    els.wSequence.textContent = 'waiting for the first marker';
+    return;
+  }
+
+  els.wStreamId.textContent = hex(marker.streamId);
+  els.wSequence.textContent = String(marker.sequence);
+  els.wOrigin.textContent = `${marker.originTimeUs} us (${
+    new Date(Number(marker.originTimeUs / 1000n)).toISOString()
+  })`;
+  els.wLatency.textContent =
+    watch.latencyMs === null ? '—' : `${watch.latencyMs.toFixed(1)} ms`;
 }
 
 async function start() {
@@ -232,13 +420,21 @@ async function start() {
     });
 
     els.sendPayload.disabled = false;
-    session.poller = setInterval(render, 200);
+    let logged = -1;
+    session.poller = setInterval(() => {
+      render();
+      const m = session.handle?.lastMarker;
+      if (m != null && m.sequence !== logged) {
+        logged = m.sequence;
+        console.log('publish', line(m));
+      }
+    }, 200);
     render();
 
     const offer = await session.pc.createOffer();
     await session.pc.setLocalDescription(offer);
 
-    const { answer, resource } = await whipPublish(
+    const { answer, resource } = await postOffer(
       endpoint,
       els.token.value.trim(),
       session.pc.localDescription.sdp,
@@ -260,7 +456,7 @@ async function stop() {
   session.handle?.detach();
   session.pc?.close();
   session.track?.stop();
-  await whipDelete(session.resource, els.token.value.trim());
+  await deleteResource(session.resource, els.token.value.trim());
 
   session.handle = null;
   session.pc = null;
@@ -273,13 +469,102 @@ async function stop() {
   if (!els.status.classList.contains('bad')) say('Stopped.');
 }
 
+async function startWatch() {
+  const endpoint = els.whep.value.trim();
+  if (endpoint === '') {
+    sayWatch('Enter a WHEP endpoint first.', true);
+    return;
+  }
+
+  els.watchStart.disabled = true;
+  sayWatch('Subscribing…');
+
+  try {
+    watch.pc = new RTCPeerConnection({ iceServers: [] });
+    const transceiver = watch.pc.addTransceiver('video', { direction: 'recvonly' });
+
+    watch.pc.addEventListener('track', (e) => {
+      els.video.srcObject = e.streams[0] ?? new MediaStream([e.track]);
+    });
+
+    // WHEP makes this page the offerer, so the track event fires only once the
+    // answer is applied and the transform is then too late: measured on Chromium
+    // 153, the video decodes and the reader sees no frames at all. The loopback
+    // fixture attaches on the track event because its receiving side answers,
+    // and there the event comes before its own setLocalDescription.
+    watch.handle = reader(transceiver.receiver, (m) => {
+      watch.latencyMs = Number(nowUs() - m.originTimeUs) / 1000;
+      console.log('watch', { ...line(m), originToHereMs: Math.round(watch.latencyMs) });
+    });
+    watch.poller = setInterval(renderWatch, 200);
+
+    const offer = await watch.pc.createOffer();
+    await watch.pc.setLocalDescription(offer);
+    await iceSettled(watch.pc);
+
+    const { answer, resource } = await postOffer(
+      endpoint,
+      els.whepToken.value.trim(),
+      watch.pc.localDescription.sdp,
+    );
+    watch.resource = resource;
+    await watch.pc.setRemoteDescription({ type: 'answer', sdp: answer });
+
+    els.watchStop.disabled = false;
+    sayWatch('Watching.');
+  } catch (e) {
+    sayWatch(String(e), true);
+    await stopWatch();
+  }
+}
+
+async function stopWatch() {
+  clearInterval(watch.poller);
+  watch.handle?.detach();
+  watch.pc?.close();
+  els.video.srcObject = null;
+  await deleteResource(watch.resource, els.whepToken.value.trim());
+
+  watch.handle = null;
+  watch.pc = null;
+  watch.poller = null;
+  watch.resource = null;
+  watch.latencyMs = null;
+
+  els.watchStart.disabled = false;
+  els.watchStop.disabled = true;
+  if (!els.watchStatus.classList.contains('bad')) sayWatch('Stopped.');
+}
+
+const COMPOSE = 'docker compose -f e2e/docker-compose.yml up -d';
+
+/** A CORS-blocked probe is indistinguishable from a dead server, so it says so. */
+async function probeServer() {
+  const endpoint = els.whip.value.trim();
+  if (endpoint === '') return;
+  try {
+    const response = await fetch(endpoint, { method: 'OPTIONS' });
+    els.reach.textContent = `Server reachable at ${endpoint} (OPTIONS ${response.status}).`;
+    els.reach.classList.remove('bad');
+  } catch {
+    els.reach.textContent =
+      `Server reachable: unknown — the browser could not complete an OPTIONS to ${endpoint}, ` +
+      `which a CORS policy alone can cause. If nothing is running, start one from browser/ with: ${COMPOSE}`;
+    els.reach.classList.add('bad');
+  }
+}
+
 els.start.addEventListener('click', () => void start());
 els.stop.addEventListener('click', () => void stop());
+els.watchStart.addEventListener('click', () => void startWatch());
+els.watchStop.addEventListener('click', () => void stopWatch());
 els.sendPayload.addEventListener('click', () => {
   const text = els.payload.value;
   session.handle?.setPayload(text === '' ? null : new TextEncoder().encode(text));
   say(text === '' ? 'Payload cleared.' : `Payload set to ${text.length} bytes.`);
 });
+
+void probeServer();
 </script>
 
 </body>
