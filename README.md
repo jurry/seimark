@@ -2,34 +2,104 @@
 
 **Type:** LIVING
 
-Per-frame metadata in H.264 SEI: a wall-clock time, a sequence number, a stream identity and a few bytes of your own data, written into every frame by a browser over WebRTC or by a Go program, and read back by Go from a live stream or a recording.
+Video that leaves a browser over WebRTC and lands in a recording loses three
+answers: at what wall-clock time was a given frame captured, which frame is it
+after a reconnect, and what was the application doing at that moment.
+Container timestamps are rewritten at every remux and side-channel logs drift.
+seimark answers all three by writing a marker inside the frame's own H.264 SEI,
+where it survives packetisation, a media server that passes SEI through,
+recording, remuxing and cutting, as long as nobody re-encodes.
 
-The marker lives inside the compressed frame, so it survives packetisation, media servers that pass SEI through, recording, remuxing and cutting, as long as nobody re-encodes.
+## What a marker carries
+
+- **Origin time**, in microseconds, and whether it is send time or capture time.
+- **A sequence number**, per stream, wrapping at 2^32.
+- **A stream id**, eight bytes identifying the source.
+- **An optional application payload**, a few bytes of your own data.
+
+The wire layout is in [`docs/format.md`](docs/format.md).
+
+## Quick start
+
+```sh
+go install github.com/jurry/seimark/cmd/seimark@latest
+```
+
+```sh
+ffmpeg -f lavfi -i testsrc=size=320x240:rate=10 -t 3 -c:v libx264 -bf 0 -f h264 raw.h264
+seimark inject -start now -stream-id 0011223344556677 raw.h264 marked.h264
+ffmpeg -i marked.h264 -c copy marked.ts
+seimark dump marked.ts
+```
+
+`dump` prints one JSON object per marker. This one is from the MPEG-TS test vector:
+
+```json
+{"au":0,"dts":126000,"pts":126000,"timescale":90000,"sync":true,"time":1.4,"marker_index":0,"version":1,"time_source":"send","origin_time":"2026-09-12T21:00:00.000000Z","origin_us":1789246800000000,"sequence":0,"stream_id":"9f3c1a77e2b04d51","payload":"dGVzdHNyYw=="}
+```
+
+| Field | Meaning |
+|---|---|
+| `au` | 0-based index of the access unit or sample |
+| `dts`, `pts`, `timescale`, `sync`, `time` | from the container; absent for Annex B |
+| `marker_index` | position among the markers of this access unit |
+| `version`, `time_source`, `origin_time`, `origin_us`, `sequence`, `stream_id`, `payload` | the marker itself |
+
+## Three ways to use it
+
+**Stamp from a browser.** One import attaches to an `RTCRtpSender` and stamps
+every outgoing frame; see [`browser/README.md`](browser/README.md). The page
+gets the stream id, the time source it settled on, and the last marker sent,
+for correlating a UI event with a frame.
+
+**Stamp from Go or the CLI.** `seimark inject` marks every access unit of an
+Annex B stream, or only IDR units with `-keyframes-only`; `-start` sets the
+origin time of the first unit, `-stream-id` sets the eight-byte id. `seimark
+nals` lists the NAL units of every access unit for debugging, marker and
+foreign SEI alike.
+
+**Read markers back.** `seimark dump` reads Annex B, MP4, FLV and MPEG-TS,
+with the format detected from the file's own bytes or forced with `-format`.
+`-out jsonl` (default) or `-out csv` picks the output shape; `-all` also
+prints access units that carry no marker. In Go, the three container readers
+yield the same sample type:
+
+```sh
+go get github.com/jurry/seimark
+```
+
+```go
+f, err := os.Open("recording.mp4")
+// handle err
+defer f.Close()
+
+for s, err := range mp4.VideoSamples(f) {
+    // handle err
+    markers, err := h264.Markers(s.Data, s.Framing.H264())
+    // handle err
+    for _, m := range markers {
+        fmt.Println(m.OriginTime, m.Sequence)
+    }
+}
+```
+
+## What it cannot do
+
+- **No clock synchronisation.** A marker carries the sender's own clock; estimating the offset between clocks is the consumer's job.
+- **Passthrough is not promised.** Whether a media server keeps SEI is measured per server, not guaranteed by this library.
+- **H.264 only.**
+- **`inject` reads Annex B only.** An MP4 input is refused; MP4 in place is a later phase.
+- **MP4 is read into memory**, not streamed.
+- **FLV: legacy AVC tags only.** Enhanced RTMP FourCC tags end the read with an error naming the codec.
+- **A PES without timestamps reports a zero DTS and PTS**, because the transport stream states no other time for it.
 
 ## Status
 
-Phases 1 to 4 are done: the Go library reads and writes markers and reads
-Annex B streams, MP4, FLV and MPEG-TS files, the CLI has `seimark dump`,
-`seimark inject` and `seimark nals`, and the browser package in
-[`browser/`](browser/README.md) stamps every outgoing H.264 frame over WebRTC.
-Phase 5, MISB ST 0604 compatibility, is next. The format is specified in
-[`docs/format.md`](docs/format.md); the roadmap is in
-[`specs/roadmap.md`](specs/roadmap.md).
-
-The module is not public yet, so build it from a clone:
-
-```
-go build -o seimark ./cmd/seimark
-./seimark dump recording.mp4
-./seimark inject -start now recording.h264 marked.h264
-./seimark nals marked.h264
-```
-
-## What it is
-
-- **A format** you can implement anywhere, with test vectors in `vectors/`.
-- **A Go library and CLI**: `seimark dump` reads markers from Annex B streams and MP4, FLV and MPEG-TS files, `seimark inject` stamps elementary streams.
-- **A browser package** that stamps every outgoing H.264 frame with one import; see [`browser/README.md`](browser/README.md).
+Phases 1 to 4 are done: the Go library reads and writes markers, reads Annex B
+streams, MP4, FLV and MPEG-TS files, the CLI has `seimark dump`, `seimark
+inject` and `seimark nals`, and the browser package stamps every outgoing
+frame over WebRTC. Phase 5, MISB ST 0604 compatibility, is next. The roadmap
+is in [`specs/roadmap.md`](specs/roadmap.md).
 
 ## Layout
 
