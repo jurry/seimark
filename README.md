@@ -26,12 +26,8 @@ The wire layout is in [`docs/format.md`](docs/format.md).
 
 ### Stamp from a browser
 
-Not on npm yet, so `npm install seimark` will not resolve; it will once
-published. Until then, clone the repository and run
-`npm install <path>/seimark/browser`, or from inside another project:
-
 ```sh
-npm install ../seimark/browser
+npm install seimark
 ```
 
 ```js
