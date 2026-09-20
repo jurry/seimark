@@ -13,7 +13,7 @@ root, [`../README.md`](../README.md).
 ## Install
 
 ```sh
-npm install seimark
+npm install @seimark/browser
 ```
 
 ESM only. Node 22 or later for the tooling; the package itself has no runtime
@@ -22,7 +22,7 @@ dependencies.
 ## Stamping a sender
 
 ```js
-import { attach } from 'seimark/webrtc';
+import { attach } from '@seimark/browser/webrtc';
 
 const sender = pc.addTrack(track, stream);
 const handle = attach(sender, {
@@ -69,7 +69,7 @@ reader on the page is also the quickest way to see whether that server keeps
 SEI.
 
 ```js
-import { reader } from 'seimark/webrtc';
+import { reader } from '@seimark/browser/webrtc';
 
 // A page that subscribes (WHEP, or any viewer that sends the offer):
 const t = pc.addTransceiver('video', { direction: 'recvonly' });
@@ -97,8 +97,8 @@ Gap and duplicate detection is per stream id and wraps with the sequence at
 
 | Import | Contains | Needs a DOM |
 |---|---|---|
-| `seimark` | The marker codec, the Annex B and length-prefixed NAL unit walk, `Writer`, `markersIn`, `stripMarkers`. | No |
-| `seimark/webrtc` | `attach`, `reader`, the `RTCRtpScriptTransform` worker and the `createEncodedStreams` fallback. | Yes |
+| `@seimark/browser` | The marker codec, the Annex B and length-prefixed NAL unit walk, `Writer`, `markersIn`, `stripMarkers`. | No |
+| `@seimark/browser/webrtc` | `attach`, `reader`, the `RTCRtpScriptTransform` worker and the `createEncodedStreams` fallback. | Yes |
 
 The core entry compiles without the DOM library, so it runs unchanged in Node —
 a server-side reader, a test harness, a page that only decodes. ADR 0006 records
@@ -107,7 +107,7 @@ why this is one package and not two.
 ## Using the codec without WebRTC
 
 ```js
-import { Writer, markersIn, stripMarkers } from 'seimark';
+import { Writer, markersIn, stripMarkers } from '@seimark/browser';
 
 const w = new Writer({ keyframesOnly: false });
 const { data, marked, warning } = w.mark(accessUnit, 'annexb', atUs, isKeyframe, payload);
