@@ -8,8 +8,11 @@ const VCL_MIN = 1;
 const VCL_MAX = 5;
 const NAL_IDR = 5;
 
+/** What `markersIn` found in one access unit. */
 export interface ScanResult {
+  /** Every seimark marker, in the order the SEI units appear. */
   markers: Marker[];
+  /** SEI units that could not be parsed. They are skipped, not thrown. */
   warnings: SeimarkError[];
 }
 
@@ -22,6 +25,11 @@ export function isMarkerSEI(unit: Uint8Array): boolean {
   }
 }
 
+/**
+ * Reads every seimark marker out of one access unit. An unparsable SEI unit
+ * becomes a warning and the scan continues, so a foreign or damaged SEI never
+ * costs the markers beside it.
+ */
 export function markersIn(au: Uint8Array, framing: Framing): ScanResult {
   const markers: Marker[] = [];
   const warnings: SeimarkError[] = [];
@@ -47,6 +55,10 @@ export function markersIn(au: Uint8Array, framing: Framing): ScanResult {
   return { markers, warnings };
 }
 
+/**
+ * Returns the access unit without its seimark SEI units, leaving foreign SEI in
+ * place. The input is returned unchanged when it carries no marker.
+ */
 export function stripMarkers(au: Uint8Array, framing: Framing): Uint8Array {
   const units = nalUnits(au, framing);
   const kept = units.filter((u) => !isMarkerSEI(u.data));
@@ -54,6 +66,7 @@ export function stripMarkers(au: Uint8Array, framing: Framing): Uint8Array {
   return kept.length === units.length ? au : joinNALUnits(kept, framing);
 }
 
+/** Reports whether the access unit carries an IDR slice, so it is a keyframe. */
 export function hasIDR(au: Uint8Array, framing: Framing): boolean {
   return nalUnits(au, framing).some((u) => nalType(u.data) === NAL_IDR);
 }

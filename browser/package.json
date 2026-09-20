@@ -1,7 +1,8 @@
 {
   "name": "seimark",
   "version": "0.1.0",
-  "description": "Per-frame metadata in H.264 SEI for WebRTC senders",
+  "description": "Per-frame metadata in H.264 SEI for WebRTC senders and receivers",
+  "keywords": ["webrtc", "h264", "sei", "whip", "whep", "encoded-transform", "timestamp", "latency", "mediamtx"],
   "license": "MIT",
   "author": "Jiri Mejzlik",
   "repository": { "type": "git", "url": "git+https://github.com/jurry/seimark.git", "directory": "browser" },
@@ -23,7 +24,8 @@
     "test": "npm run build:worker && node --test --experimental-strip-types test/*.test.ts",
     "demo": "node demo/serve.mjs",
     "demo:screenshot": "node demo/screenshot.mjs",
-    "e2e": "npm run build && playwright test"
+    "e2e": "npm run build && playwright test",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

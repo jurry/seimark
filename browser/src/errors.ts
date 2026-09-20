@@ -1,3 +1,8 @@
+/**
+ * The machine-readable reason a seimark operation failed. The code, not the
+ * message, is what a caller should branch on; messages are for humans and may
+ * change.
+ */
 export type SeimarkErrorCode =
   | 'unsupported_version'
   | 'truncated'
@@ -13,7 +18,13 @@ export type SeimarkErrorCode =
   // Not raised by this package: the handler's label for a foreign exception.
   | 'unknown';
 
+/**
+ * Every error this package raises. Thrown synchronously by the codec and by
+ * `attach`; on a live stream the same value is instead reported through
+ * `onError` as a code and message pair, never thrown into the transform.
+ */
 export class SeimarkError extends Error {
+  /** The reason, for branching; `message` explains the same thing for a human. */
   readonly code: SeimarkErrorCode;
 
   constructor(code: SeimarkErrorCode, message: string) {
