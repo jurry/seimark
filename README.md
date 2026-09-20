@@ -1,14 +1,14 @@
 # seimark
 
-**Type:** LIVING
-
 Video that leaves a browser over WebRTC and lands in a recording loses three
 answers: at what wall-clock time was a given frame captured, which frame is it
 after a reconnect, and what was the application doing at that moment.
 Container timestamps are rewritten at every remux and side-channel logs drift.
 seimark answers all three by writing a marker inside the frame's own H.264 SEI,
 where it survives packetisation, a media server that passes SEI through,
-recording, remuxing and cutting, as long as nobody re-encodes.
+recording, remuxing and cutting, as long as nobody re-encodes. The typical
+pipeline: a page stamps its outgoing frames, a media server records them, and
+the Go CLI or library reads the markers back out of the recording.
 
 ## What a marker carries
 
@@ -20,6 +20,26 @@ recording, remuxing and cutting, as long as nobody re-encodes.
 The wire layout is in [`docs/format.md`](docs/format.md).
 
 ## Quick start
+
+### Stamp from a browser
+
+```sh
+npm install github:jurry/seimark#main         # not on npm yet
+```
+
+```js
+import { attach } from 'seimark/webrtc';
+
+const sender = pc.addTrack(track, stream);
+const handle = attach(sender);
+// later, at a UI event:
+console.log(handle.streamId, handle.lastMarker);
+```
+
+`attach` must be called before `setLocalDescription`. See
+[`browser/README.md`](browser/README.md) for the rest.
+
+### Read the markers back
 
 ```sh
 go install github.com/jurry/seimark/cmd/seimark@latest

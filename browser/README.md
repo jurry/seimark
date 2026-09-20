@@ -1,7 +1,5 @@
 # seimark (browser)
 
-**Type:** LIVING
-
 Per-frame metadata in H.264 SEI, for WebRTC senders and receivers in the browser.
 
 A seimark marker carries a stream id, a monotonic sequence number, an origin
@@ -9,7 +7,8 @@ timestamp in microseconds, a flag saying whether that time is capture time or
 send time, and an optional application payload. The wire format is
 `docs/format.md` in this repository; `vectors/` is its conformance suite and the
 tests here read it directly, so the TypeScript and Go implementations are held to
-the same bytes.
+the same bytes. The recording is read back with the Go CLI in the repository
+root, [`../README.md`](../README.md).
 
 ## Install
 
@@ -17,75 +16,11 @@ Not published to npm yet, so `npm install seimark` will not resolve. Until it is
 
 ```sh
 npm install /path/to/seimark/browser          # from a local checkout
-npm install github:jurry/seimark#main         # once the branch is merged
+npm install github:jurry/seimark#main         # from GitHub
 ```
 
 ESM only. Node 22 or later for the tooling; the package itself has no runtime
 dependencies.
-
-## Running everything from a clean checkout
-
-Every check in this repository, in the order to run them. Each step is
-independent; you can stop after any of them.
-
-```sh
-# 0. the Go side (the reference implementation and the CLI)
-cd /path/to/seimark
-make test lint
-
-# 1. build the browser package and run its tests
-cd browser
-npm ci
-npm run typecheck
-npm test                 # node:test, reads ../vectors/, no browser needed
-npm run build
-
-# 2. the loopback browser test: real Chromium, real H.264,
-#    attach() stamps and reader() reads back in one page
-npx playwright install chromium
-npm run e2e -- --project=chromium
-
-# 3. the demo page, by hand
-npm run demo             # serves this directory on http://127.0.0.1:8088
-#    for something to publish to:
-#      docker compose -f e2e/docker-compose.yml up -d
-#    then open http://127.0.0.1:8088/demo/ and use the WHIP endpoint
-#      http://127.0.0.1:8889/seimark/whip
-
-# 4. the full claim, end to end and automatic:
-#    browser -> WHIP server -> recording -> Go CLI reads the markers back
-#    starts a WHIP server itself if none is running
-go build -o /tmp/seimark ../cmd/seimark
-SEIMARK_CLI=/tmp/seimark node e2e/whip-verify.mjs
-```
-
-Step 4 is the one that proves what this package is for. It publishes from the
-demo page, lets the server record it, then reads the recording with the Go CLI
-and fails unless every marker survived in order:
-
-```
-page:        frames seen / marked 414 / 414 | sequence 413 | errors 0
-markers:     417  seq 0..416
-gaps:        0   duplicates: 0
-wall clock:  14.95s   container: 14.95s   drift: 0 ms
-PASS: every frame the browser stamped survived to the recording, in order.
-```
-
-Firefox is excluded from step 2 on purpose: its H.264 encoder is a
-runtime-downloaded plugin, absent from the Playwright build, so the spec is left
-failing rather than skipped. `npm run e2e` without `--project` will show that
-failure.
-
-## Two entry points
-
-| Import | Contains | Needs a DOM |
-|---|---|---|
-| `seimark` | The marker codec, the SEI container, the Annex B and length-prefixed NAL unit walk, `Writer`, `markersIn`, `stripMarkers`. | No |
-| `seimark/webrtc` | `attach`, `reader`, the `RTCRtpScriptTransform` worker and the `createEncodedStreams` fallback. | Yes |
-
-The core entry compiles without the DOM library, so it runs unchanged in Node —
-a server-side reader, a test harness, a page that only decodes. ADR 0006 records
-why this is one package and not two.
 
 ## Stamping a sender
 
@@ -124,6 +59,18 @@ one interval.
 
 ## Reading a receiver
 
+The other direction: a page that receives a video track, a viewer or the far
+end of a call, sees each incoming frame before it is decoded, and `reader`
+pulls the marker out of it. That gives the viewer what the recording gives the
+Go CLI, but live: the sender's clock on every frame, so end-to-end latency can
+be measured with no server involved (the difference to the local clock is
+transit time plus a constant clock offset, and its changes are the latency
+changes); gaps and duplicates per stream id, so loss and reconnects show up
+on the viewer; and the sender's payload, so the viewer knows which frames
+belong to which take or event. Subscribing through a media server with a
+reader on the page is also the quickest way to see whether that server keeps
+SEI.
+
 ```js
 import { reader } from 'seimark/webrtc';
 
@@ -137,6 +84,17 @@ pc.addEventListener('track', (e) => {
 
 Gap and duplicate detection is per stream id and wraps with the sequence at
 2^32.
+
+## Two entry points
+
+| Import | Contains | Needs a DOM |
+|---|---|---|
+| `seimark` | The marker codec, the SEI container, the Annex B and length-prefixed NAL unit walk, `Writer`, `markersIn`, `stripMarkers`. | No |
+| `seimark/webrtc` | `attach`, `reader`, the `RTCRtpScriptTransform` worker and the `createEncodedStreams` fallback. | Yes |
+
+The core entry compiles without the DOM library, so it runs unchanged in Node —
+a server-side reader, a test harness, a page that only decodes. ADR 0006 records
+why this is one package and not two.
 
 ## Using the codec without WebRTC
 
@@ -165,7 +123,7 @@ the page.
   spec fails there rather than skipping, so the gap stays visible.
 - **`captureTime` is absent on Chromium sender frames** (Chromium 153, 117
   marked frames), so the probe chooses `'send'` and markers carry flag 0.
-  Deriving a capture time from the frame's presentation timestamp is phase 4
+  Deriving a capture time from the frame's presentation timestamp is phase 5
   work. Firefox is unmeasured for the reason above.
 - **The payload is pushed, not computed per frame.** On the standard path the
   writer runs in a worker, which cannot call back into the page, so
@@ -218,13 +176,56 @@ the Go CLI and check that every one survived in order.
 
 ## Development
 
+Every check in this repository, in the order to run them. Each step is
+independent; you can stop after any of them.
+
 ```sh
+# 0. the Go side (the reference implementation and the CLI)
+cd /path/to/seimark
+make test lint
+
+# 1. build the browser package and run its tests
+cd browser
 npm ci
 npm run typecheck
-npm test          # node:test, reads ../vectors/
+npm test                 # node:test, reads ../vectors/, no browser needed
 npm run build
+
+# 2. the loopback browser test: real Chromium, real H.264,
+#    attach() stamps and reader() reads back in one page
+npx playwright install chromium
 npm run e2e -- --project=chromium
+
+# 3. the demo page, by hand
+npm run demo             # serves this directory on http://127.0.0.1:8088
+#    for something to publish to:
+#      docker compose -f e2e/docker-compose.yml up -d
+#    then open http://127.0.0.1:8088/demo/ and use the WHIP endpoint
+#      http://127.0.0.1:8889/seimark/whip
+
+# 4. the full claim, end to end and automatic:
+#    browser -> WHIP server -> recording -> Go CLI reads the markers back
+#    starts a WHIP server itself if none is running
+go build -o /tmp/seimark ../cmd/seimark
+SEIMARK_CLI=/tmp/seimark node e2e/whip-verify.mjs
 ```
+
+Step 4 is the one that proves what this package is for. It publishes from the
+demo page, lets the server record it, then reads the recording with the Go CLI
+and fails unless every marker survived in order:
+
+```
+page:        frames seen / marked 414 / 414 | sequence 413 | errors 0
+markers:     417  seq 0..416
+gaps:        0   duplicates: 0
+wall clock:  14.95s   container: 14.95s   drift: 0 ms
+PASS: every frame the browser stamped survived to the recording, in order.
+```
+
+Firefox is excluded from step 2 on purpose: its H.264 encoder is a
+runtime-downloaded plugin, absent from the Playwright build, so the spec is left
+failing rather than skipped. `npm run e2e` without `--project` will show that
+failure.
 
 ## Licence
 
