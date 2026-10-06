@@ -216,7 +216,11 @@ func progressiveSample(
 		return container.Sample{}, fmt.Errorf("seimark: sample %d data: %w", nr, err)
 	}
 
-	dts, _ := stbl.Stts.GetDecodeTime(nr)
+	dts, _, err := stbl.Stts.GetDecodeTime(nr)
+	if err != nil {
+		return container.Sample{}, fmt.Errorf("seimark: sample %d: %w", nr, err)
+	}
+
 	if dts > math.MaxInt64 {
 		return container.Sample{}, fmt.Errorf("seimark: sample %d: decode time %d overflows int64", nr, dts)
 	}
