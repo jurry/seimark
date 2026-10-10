@@ -3,7 +3,7 @@ module github.com/jurry/seimark
 go 1.26
 
 require (
-	github.com/Eyevinn/mp4ff v0.57.0
+	github.com/Eyevinn/mp4ff v0.59.0
 	github.com/asticode/go-astits v1.16.0
 )
 
