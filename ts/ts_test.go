@@ -405,6 +405,16 @@ func TestTimestampsSurvivePaddingAndShortStartCodes(t *testing.T) {
 			want: []uint64{6000, 15000, 24000},
 		},
 		{
+			// Two start codes with nothing between them: padding, not a NAL unit.
+			name: "empty NAL unit between start codes",
+			packets: []pesSpec{
+				{payload: append(accessUnit(0x05), 0, 0, 0, 1, 0, 0, 0, 1), indicator: astits.PTSDTSIndicatorBothPresent, pts: 9000, dts: 6000},
+				{payload: accessUnit(0x01), indicator: astits.PTSDTSIndicatorBothPresent, pts: 27000, dts: 15000},
+				{payload: accessUnit(0x01), indicator: astits.PTSDTSIndicatorBothPresent, pts: 36000, dts: 24000},
+			},
+			want: []uint64{6000, 15000, 24000},
+		},
+		{
 			name: "three-byte start codes",
 			packets: []pesSpec{
 				{payload: threeByte(accessUnit(0x05)), indicator: astits.PTSDTSIndicatorBothPresent, pts: 9000, dts: 6000},
@@ -412,6 +422,15 @@ func TestTimestampsSurvivePaddingAndShortStartCodes(t *testing.T) {
 				{payload: threeByte(accessUnit(0x01)), indicator: astits.PTSDTSIndicatorBothPresent, pts: 36000, dts: 24000},
 			},
 			want: []uint64{6000, 15000, 24000},
+		},
+		{
+			// The zero ends the first PES; it is not part of the next start code.
+			name: "trailing zero before a three-byte start code",
+			packets: []pesSpec{
+				{payload: append(threeByte(accessUnit(0x05)), 0), indicator: astits.PTSDTSIndicatorBothPresent, pts: 9000, dts: 6000},
+				{payload: threeByte(accessUnit(0x01)), indicator: astits.PTSDTSIndicatorBothPresent, pts: 27000, dts: 15000},
+			},
+			want: []uint64{6000, 15000},
 		},
 		{
 			name: "access unit spanning two PES packets",

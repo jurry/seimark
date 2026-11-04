@@ -47,8 +47,9 @@ type AccessUnit struct {
 	// trailing zeros dropped, so Bytes is not Offset's slice of the input.
 	Bytes []byte
 
-	// Offset is the byte position in the input of the start code preceding the
-	// unit's first NAL unit.
+	// Offset is the byte position in the input of the 00 00 01 preceding the
+	// unit's first NAL unit. A zero before it is not counted, even when it makes
+	// a four-byte start code, because it may be the previous unit's trailing zero.
 	Offset int
 }
 
@@ -174,11 +175,8 @@ func splitNALUnits(data []byte, atEOF bool) (advance int, token []byte, start in
 		return 0, nil, 0
 	}
 
-	// A four-byte start code is the three-byte one with a leading zero.
+	// Not widened over a zero before it: that may be the previous unit's trailing zero.
 	start = begin
-	if begin > 0 && data[begin-1] == 0 {
-		start = begin - 1
-	}
 
 	begin += len(sc)
 
@@ -196,11 +194,8 @@ func splitNALUnits(data []byte, atEOF bool) (advance int, token []byte, start in
 	return end, trimZeros(data[begin:end]), start
 }
 
+// trimZeros returns an all-zero b as an empty token, not nil: once the reader
+// has reported EOF, bufio.Scanner takes a nil token as the end of the input.
 func trimZeros(b []byte) []byte {
-	b = bytes.TrimRight(b, "\x00")
-	if len(b) == 0 {
-		return nil
-	}
-
-	return b
+	return bytes.TrimRight(b, "\x00")
 }
