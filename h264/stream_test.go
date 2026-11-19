@@ -3,6 +3,7 @@ package h264
 import (
 	"bytes"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -242,35 +243,106 @@ func TestAccessUnitsKeyframesOnlyShape(t *testing.T) {
 func TestAccessUnitsAtReportsTheOffsetOfEachStartCode(t *testing.T) {
 	t.Parallel()
 
-	// Leading garbage, then a four-byte start code, then a three-byte one.
-	stream := make([]byte, 0, 6+len(idr)+3+len(nonIDR))
-	stream = append(stream, 0xaa, 0xbb)
-	firstAt := len(stream)
-	stream = append(stream, 0, 0, 0, 1)
-	stream = append(stream, idr...)
+	// lead is what precedes a unit's 00 00 01: garbage, the zero of a four-byte
+	// start code, trailing zeros or empty NAL units. None of it is counted.
+	type unit struct{ lead, nal []byte }
 
-	secondAt := len(stream)
-	stream = append(stream, 0, 0, 1)
-	stream = append(stream, nonIDR...)
+	for _, tc := range []struct {
+		name  string
+		units []unit
+	}{
+		{
+			name:  "leading garbage, then four-, three- and four-byte start codes",
+			units: []unit{{[]byte{0xaa, 0xbb, 0}, idr}, {nil, nonIDR}, {[]byte{0}, nonIDRMore}},
+		},
+		{
+			name:  "four-byte start codes throughout",
+			units: []unit{{[]byte{0}, idr}, {[]byte{0}, nonIDR}, {[]byte{0}, nonIDRMore}},
+		},
+		{
+			name:  "trailing zeros before a three-byte start code",
+			units: []unit{{nil, idr}, {[]byte{0, 0, 0}, nonIDR}},
+		},
+		{
+			name:  "empty NAL units",
+			units: []unit{{nil, idr}, {[]byte{0, 0, 1, 0, 0, 1}, nonIDR}, {[]byte{0, 0, 0, 1, 0}, nonIDRMore}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	var got []int
+			var stream []byte
 
-	for au, err := range AccessUnitsAt(bytes.NewReader(stream)) {
-		if err != nil {
-			t.Fatalf("AccessUnitsAt: %v", err)
-		}
+			var want []int
 
-		got = append(got, au.Offset)
+			for _, u := range tc.units {
+				stream = append(stream, u.lead...)
+				want = append(want, len(stream))
+				stream = append(stream, 0, 0, 1)
+				stream = append(stream, u.nal...)
+			}
+
+			var got []int
+
+			for au, err := range AccessUnitsAt(bytes.NewReader(stream)) {
+				if err != nil {
+					t.Fatalf("AccessUnitsAt: %v", err)
+				}
+
+				got = append(got, au.Offset)
+			}
+
+			if !slices.Equal(got, want) {
+				t.Errorf("offsets %v, want %v", got, want)
+			}
+		})
 	}
+}
 
-	want := []int{firstAt, secondAt}
-	if len(got) != len(want) {
-		t.Fatalf("got %d access units, want %d", len(got), len(want))
-	}
+func TestAccessUnitsSkipsEmptyNALUnits(t *testing.T) {
+	t.Parallel()
 
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("access unit %d: Offset = %d, want %d", i, got[i], want[i])
-		}
+	// Start codes with nothing between them enclose no NAL unit; they must
+	// neither appear as one nor end the scan.
+	for _, tc := range []struct {
+		name   string
+		stream []byte
+		want   [][][]byte // the NAL units of each access unit
+	}{
+		{
+			name:   "four-byte start codes",
+			stream: slices.Concat(annexB(sps, pps, idr), []byte{0, 0, 0, 1, 0, 0, 0, 1}, annexB(nonIDR, nonIDRMore)),
+			want:   [][][]byte{{sps, pps, idr}, {nonIDR}, {nonIDRMore}},
+		},
+		{
+			name:   "three-byte start codes",
+			stream: slices.Concat(annexB(idr), []byte{0, 0, 1, 0, 0, 1}, annexB(nonIDR)),
+			want:   [][][]byte{{idr}, {nonIDR}},
+		},
+		{
+			name:   "a bare start code at the end",
+			stream: append(annexB(idr, nonIDR), 0, 0, 0, 1),
+			want:   [][][]byte{{idr}, {nonIDR}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			aus := collect(t, tc.stream)
+			if len(aus) != len(tc.want) {
+				t.Fatalf("got %d access units, want %d", len(aus), len(tc.want))
+			}
+
+			for i, au := range aus {
+				nals, err := NALUnits(au, FormatAnnexB)
+				if err != nil {
+					t.Fatalf("access unit %d: NALUnits: %v", i, err)
+				}
+
+				if !slices.EqualFunc(nals, tc.want[i], bytes.Equal) {
+					t.Errorf("access unit %d is %x, want %x", i, nals, tc.want[i])
+				}
+			}
+		})
 	}
 }
